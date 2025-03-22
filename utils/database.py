@@ -72,3 +72,4 @@ class Database:
         if row:
             return int(row[0])
         return None
+ 
