@@ -30,11 +30,10 @@
       overflow-x: hidden;
     }
 
-    /* Da wir data-bs-theme="dark" nutzen, orientiert sich Bootstrap automatisch an dunklen Farben. */
     :root[data-bs-theme="dark"] {
       --bs-body-bg: transparent; 
       --bs-body-color: #f8f9fa;
-      --bs-card-bg: rgba(35, 37, 38, 0.7); /* Halbtransparentes "Glas" */
+      --bs-card-bg: rgba(35, 37, 38, 0.7);
       --bs-card-color: #f8f9fa;
       --bs-card-border-color: rgba(255, 255, 255, 0.1);
       --bs-border-color-translucent: rgba(255, 255, 255, 0.15);
@@ -43,9 +42,6 @@
       --bs-table-striped-bg: rgba(43, 45, 47, 0.7);
     }
 
-    /***********************************************
-    * 2) Navbar & Animation
-    ***********************************************/
     nav.navbar {
       background-color: rgba(0, 0, 0, 0.6) !important; 
       backdrop-filter: blur(6px);
@@ -53,7 +49,6 @@
       border-bottom: 1px solid rgba(255,255,255,0.1);
     }
 
-    /* Einblend-Animation des Hauptinhalts */
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(10px); }
       to   { opacity: 1; transform: translateY(0);    }
@@ -62,9 +57,6 @@
       animation: fadeIn 0.7s ease-out;
     }
 
-    /***********************************************
-    * 3) Header-Bereich
-    ***********************************************/
     .header-area {
       background-color: rgba(0,0,0,0.3);
       backdrop-filter: blur(4px);
@@ -81,9 +73,6 @@
       color: #bdbdbd;
     }
 
-    /***********************************************
-    * 4) Content-Card (Suchfeld / Tabelle)
-    ***********************************************/
     .content-card {
       background-color: var(--bs-card-bg);
       color: var(--bs-card-color);
@@ -104,9 +93,6 @@
       background-color: rgba(255,255,255,0.06) !important;
     }
 
-    /***********************************************
-    * 5) Badges für Ticket-Status
-    ***********************************************/
     .badge-status-open {
       background-color: #28a745; 
     }
@@ -121,9 +107,6 @@
       background-color: #6c757d;
     }
 
-    /***********************************************
-    * 6) Buttons / Hover-Effekte
-    ***********************************************/
     .btn-primary {
       box-shadow: 0 2px 5px rgba(0,0,0,0.4);
     }
@@ -131,9 +114,6 @@
       opacity: 0.9;
     }
 
-    /***********************************************
-    * 7) Scroll-to-Top Button
-    ***********************************************/
     #scrollToTopBtn {
       position: fixed;
       bottom: 2rem;
@@ -207,7 +187,7 @@
           <thead class="table-dark">
             <tr>
               <th>Ticket-ID</th>
-              <th>User-ID</th>
+              <th>User</th>
               <th>Status</th>
               <th>Transkript erstellt am</th>
               <th>Details</th>
@@ -216,23 +196,29 @@
           <tbody>
             {% for ticket in tickets %}
             {% set status_class = "badge-status-default" %}
-            {% if ticket[2]|lower == "open" %}
+            {% if ticket[3]|lower == "open" %}
               {% set status_class = "badge-status-open" %}
-            {% elif ticket[2]|lower == "closed" %}
+            {% elif ticket[3]|lower == "closed" %}
               {% set status_class = "badge-status-closed" %}
-            {% elif "progress" in ticket[2]|lower %}
+            {% elif "progress" in ticket[3]|lower %}
               {% set status_class = "badge-status-progress" %}
             {% endif %}
 
             <tr>
+              <!-- ticket[0] = t.id -->
               <td>{{ ticket[0] }}</td>
+
+              <!-- ticket[1] = t.user_id, ticket[2] = t.user_name -->
               <td>
-                <span class="badge text-bg-secondary">{{ ticket[1] }}</span>
+                <span class="fw-bold">{{ ticket[2] }}</span><br/>
+                <span class="badge text-bg-secondary">ID: {{ ticket[1] }}</span>
               </td>
+
+              <!-- ticket[3] = t.status, ticket[4] = tr.created_at -->
               <td>
-                <span class="badge {{ status_class }}">{{ ticket[2] }}</span>
+                <span class="badge {{ status_class }}">{{ ticket[3] }}</span>
               </td>
-              <td>{{ ticket[3] }}</td>
+              <td>{{ ticket[4] }}</td>
               <td>
                 <a class="btn btn-primary btn-sm" href="{{ url_for('show_transcript', ticket_id=ticket[0]) }}">
                   <i class="bi bi-eye"></i> Anzeigen

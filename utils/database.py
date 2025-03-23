@@ -27,6 +27,15 @@ class Database:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+
+            # --- Neu: Spalte user_name hinzufügen, falls sie noch nicht existiert ---
+            # Wir probieren einfach ein ALTER TABLE und fangen einen Fehler ab.
+            try:
+                conn.execute("ALTER TABLE tickets ADD COLUMN user_name TEXT;")
+            except sqlite3.OperationalError:
+                # Falls schon existiert, ignorieren wir den Fehler.
+                pass
+
             conn.commit()
 
     def get_next_ticket_id(self):
@@ -37,17 +46,17 @@ class Database:
             max_id = row[0] if row else 0
             return max_id + 1
 
-    def insert_ticket(self, ticket_id, user_id, channel_id):
+    def insert_ticket(self, ticket_id, user_id, user_name, channel_id):
         with sqlite3.connect("tickets.sqlite") as conn:
             conn.execute(
-                "INSERT INTO tickets (id, user_id, channel_id) VALUES (?, ?, ?)",
-                (ticket_id, str(user_id), str(channel_id))
+                "INSERT INTO tickets (id, user_id, user_name, channel_id) VALUES (?, ?, ?, ?)",
+                (ticket_id, str(user_id), user_name, str(channel_id))
             )
             conn.commit()
 
-    def log_ticket_created(self, ticket_id: int, user_id: int, channel_id: int):
-        self.insert_ticket(ticket_id, user_id, channel_id)
-        print(f"[DB] Ticket erstellt - ID={ticket_id}, User={user_id}, Channel={channel_id}")
+    def log_ticket_created(self, ticket_id: int, user_id: int, user_name: str, channel_id: int):
+        self.insert_ticket(ticket_id, user_id, user_name, channel_id)
+        print(f"[DB] Ticket erstellt - ID={ticket_id}, UserID={user_id}, Name='{user_name}', Channel={channel_id}")
 
     def log_ticket_claimed(self, ticket_id: int, supporter_id: int):
         with sqlite3.connect("tickets.sqlite") as conn:

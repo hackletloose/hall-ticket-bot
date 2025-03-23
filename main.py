@@ -46,7 +46,7 @@ async def on_ready():
     support_role = guild.get_role(config.SUPPORT_ROLE_ID)
     admin_role = guild.get_role(config.ADMIN_ROLE_ID)
     viewer_role = guild.get_role(config.VIEWER_ROLE_ID)
-    viewer_role2 = guild.get_role(config.VIEWER2_ROLE_ID)  # NEU
+    viewer_role2 = guild.get_role(config.VIEWER2_ROLE_ID)
 
     # Overwrites (Created)
     await fix_category_perms(
@@ -58,7 +58,7 @@ async def on_ready():
         support_role=support_role,
         admin_role=admin_role,
         viewer_role=viewer_role,
-        viewer_role2=viewer_role2,  # NEU
+        viewer_role2=viewer_role2,
         everyone=everyone
     )
 
@@ -72,7 +72,7 @@ async def on_ready():
         support_role=support_role,
         admin_role=admin_role,
         viewer_role=viewer_role,
-        viewer_role2=viewer_role2,  # NEU
+        viewer_role2=viewer_role2,
         everyone=everyone
     )
 
@@ -86,7 +86,7 @@ async def on_ready():
         support_role=support_role,
         admin_role=admin_role,
         viewer_role=viewer_role,
-        viewer_role2=viewer_role2,  # NEU
+        viewer_role2=viewer_role2,
         everyone=everyone
     )
 
@@ -100,7 +100,7 @@ async def fix_category_perms(
     admin_view: bool, admin_send: bool,
     viewer_view: bool, viewer_send: bool,
     support_role: discord.Role, admin_role: discord.Role,
-    viewer_role: discord.Role, viewer_role2: discord.Role,  # NEU
+    viewer_role: discord.Role, viewer_role2: discord.Role,
     everyone: discord.Role
 ):
     """
@@ -125,7 +125,7 @@ async def fix_category_perms(
     if viewer_role:
         await category.set_permissions(viewer_role, view_channel=viewer_view, send_messages=viewer_send)
 
-    # Viewer 2 (NEU)
+    # Viewer 2
     if viewer_role2:
         await category.set_permissions(viewer_role2, view_channel=viewer_view, send_messages=viewer_send)
 

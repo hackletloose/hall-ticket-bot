@@ -1,4 +1,3 @@
-# cogs/ticket_cog.py
 import discord
 from discord.ext import commands
 import re
@@ -47,7 +46,7 @@ class TicketCog(commands.Cog):
         # channel_id -> (bool has_id, str stored_id)
         self.channel_has_id = defaultdict(lambda: (False, ""))
 
-        # Zähler für uneinsichtiges Verhalten: channel_id -> int
+        # Zähler für uneinsichtiges Verhalten
         self.uncooperative_count = defaultdict(int)
 
         # OpenAI Setup
@@ -64,7 +63,7 @@ class TicketCog(commands.Cog):
         name="setup_ticket_button",
         description="Erstellt im aktuellen Kanal eine Nachricht mit einem Ticket-Button (nur Admin)."
     )
-    @commands.has_role(config.ADMIN_ROLE_ID)
+    @commands.has_role(config.ADMIN_ROLE_ID)  # <-- Integer Check
     async def setup_ticket_button(self, ctx: discord.ApplicationContext):
         embed = discord.Embed(
             title="Ticket-Hilfe",
@@ -124,7 +123,13 @@ class TicketCog(commands.Cog):
                 print("[ERROR] Created-Tickets-Kategorie nicht gefunden.")
                 return
 
-            channel_name = f"{user.name.replace(' ', '-')[:20]}-{ticket_id}"
+            # Discord-Nick oder -Name
+            if isinstance(user, discord.Member) and user.nick:
+                user_name = user.nick
+            else:
+                user_name = user.name
+
+            channel_name = f"{user_name.replace(' ', '-')[:20]}-{ticket_id}"
             ticket_channel = await guild.create_text_channel(
                 name=channel_name,
                 category=category,
@@ -137,7 +142,7 @@ class TicketCog(commands.Cog):
             if viewer_role:
                 await ticket_channel.set_permissions(viewer_role, view_channel=True, send_messages=False)
 
-            self.db.log_ticket_created(ticket_id, user.id, ticket_channel.id)
+            self.db.log_ticket_created(ticket_id, user.id, user_name, ticket_channel.id)
 
             # KI aktivieren
             self.ai_enabled_for_channel[ticket_channel.id] = True
@@ -215,7 +220,7 @@ class TicketCog(commands.Cog):
         guild = interaction.guild
         support_role = guild.get_role(config.SUPPORT_ROLE_ID)
         if support_role:
-            # Sperre die Schreibrechte zunächst für den gesamten Support-Rang
+            # Sperre die Schreibrechte für den gesamten Support-Rang
             await channel.set_permissions(support_role, send_messages=False)
 
         await channel.set_permissions(interaction.user, view_channel=True, send_messages=True)
@@ -259,6 +264,7 @@ class TicketCog(commands.Cog):
 
         self.db.log_ticket_closed(ticket_id)
         await channel.send("Ticket wird geschlossen. Bitte hier nichts mehr schreiben.")
+
         # Transkript
         messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
         lines = []
@@ -302,6 +308,7 @@ class TicketCog(commands.Cog):
             return
 
         await interaction.followup.send(f"Ticket #{ticket_id} wird nun gelöscht (Transkript bleibt gespeichert).", ephemeral=True)
+
         # Letztes Transkript
         messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
         lines = []
@@ -371,7 +378,7 @@ class TicketCog(commands.Cog):
             print(f"[LOG] Nutzer {message.author.name} bat um Entschuldigungsvorlage. Abgelehnt.")
             return
 
-        # 2) Klassifiziere, ob der Nutzer unkooperativ ist
+        # 2) Klassifiziere kooperativ/unkooperativ (per GPT)
         is_cooperative = await self.classify_cooperative(channel_id)
         if not is_cooperative:
             self.uncooperative_count[channel_id] += 1
@@ -388,7 +395,7 @@ class TicketCog(commands.Cog):
         else:
             print(f"[LOG] => kooperativ (Channel: {channel_id})")
 
-        # 3) Prüfe, ob ID schon vorliegt
+        # 3) Prüfe, ob ID bereits genannt wurde
         has_id, stored_id = self.channel_has_id[channel_id]
         if not has_id:
             possible_ids = re.findall(r"\b[a-zA-Z0-9]{16,}\b", user_text)
@@ -450,7 +457,7 @@ class TicketCog(commands.Cog):
                     print(f"[LOG] Unbekannte ID {found_id} im Channel {channel_id}.")
                     return
         else:
-            # 4) Stellungnahme liegt noch nicht (oder unzureichend) vor -> check is_sufficient_explanation
+            # 4) Ausreichende Stellungnahme?
             if self.is_sufficient_explanation(user_text, message.guild):
                 admin_role = message.guild.get_role(config.ADMIN_ROLE_ID)
                 support_role = message.guild.get_role(config.SUPPORT_ROLE_ID)
@@ -470,7 +477,7 @@ class TicketCog(commands.Cog):
                 print(f"[LOG] Stellungnahme ausreichend => KI für Channel {channel_id} deaktiviert und an Support/Admin verwiesen.")
                 return
 
-            # Sonst -> KI weiterfragen
+            # Sonst -> KI fragt weiter nach
             await asyncio.sleep(2)
             try:
                 ai_reply = await self.generate_ai_response(channel_id)
@@ -486,10 +493,7 @@ class TicketCog(commands.Cog):
         Gibt True zurück, wenn der Nutzer kooperativ wirkt.
         Gibt False zurück, wenn der Nutzer unkooperativ wirkt.
         """
-        # Nimm z.B. nur die letzten 6 Nachrichten, um Tokens zu sparen
         recent_messages = self.conversations[channel_id][-6:]
-
-        # Wir loggen, welche Nachrichten wir an die KI geben
         print("[LOG] [classify_cooperative] Letzte Nachrichten (Channel:", channel_id, ")")
         for i, msg in enumerate(recent_messages, start=1):
             snippet = msg["content"][:80].replace("\n", " ")
@@ -500,7 +504,7 @@ class TicketCog(commands.Cog):
             "content": (
                 "Du bist ein Evaluations-Assistent. Prüfe die folgenden Nachrichten kurz "
                 "und entscheide, ob der Nutzer 'unkooperativ' ist oder nicht. "
-                "Beleidigungen, aggressives Verhalten, ignoriere alle Fragen => unkooperativ. "
+                "Beleidigungen, aggressives Verhalten, ignoriert alle Fragen => unkooperativ. "
                 "Wenn der Nutzer einigermaßen höflich/sachlich ist => cooperative. "
                 "ACHTUNG: Antworte nur mit dem Wort 'uncooperative' oder 'cooperative'. "
                 "Keine Abkürzungen, keine Satzzeichen."
@@ -508,16 +512,15 @@ class TicketCog(commands.Cog):
         }
 
         messages_for_ai = [system_prompt] + recent_messages
-
         loop = asyncio.get_running_loop()
 
         def sync_call():
             response = self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=messages_for_ai,
-                max_tokens=5,    # ein paar Tokens erlauben, damit die KI nicht abbricht
-                temperature=0.0, # kein Random
-                n=1,            # nur 1 Antwort
+                max_tokens=5,
+                temperature=0.0,
+                n=1,
             )
             return response
 
@@ -526,10 +529,6 @@ class TicketCog(commands.Cog):
             classification = response.choices[0].message.content.strip().lower()
             print(f"[LOG] KI-Klassifikation => '{classification}' (Channel {channel_id})")
 
-            # Falls sie nur "un" schreibt, werten wir das als "uncooperative"
-            # Falls sie "co" schreibt => "cooperative"
-            # Oder wir parsen streng, wenn "uncooperative" drin ist => false
-            # sonst => true
             if "uncooperative" in classification:
                 return False
             elif "cooperative" in classification:
@@ -537,7 +536,6 @@ class TicketCog(commands.Cog):
             elif classification.startswith("un"):
                 return False
             else:
-                # Fallback: Kooperativ
                 return True
 
         except Exception as e:
@@ -570,27 +568,24 @@ class TicketCog(commands.Cog):
             }
         ]
 
+        loop = asyncio.get_running_loop()
+
+        def sync_call():
+            return self.openai_client.chat.completions.create(
+                model=self.openai_model,
+                messages=prompt_messages,
+                max_tokens=150,
+                temperature=0.7
+            )
+
         try:
-            loop = asyncio.get_running_loop()
-
-            def sync_call():
-                return self.openai_client.chat.completions.create(
-                    model=self.openai_model,
-                    messages=prompt_messages,
-                    max_tokens=150,  # Max. 150 Tokens
-                    temperature=0.7
-                )
-
             response = await loop.run_in_executor(None, sync_call)
             elaboration = response.choices[0].message.content.strip()
-            # Sicherheitshalber auf ~300 Zeichen beschneiden
             elaboration = safe_truncate(elaboration, 300)
             print(f"[LOG] elaborate_ban_reason => {elaboration[:80]}{'...' if len(elaboration)>80 else ''}")
             return elaboration
-
         except Exception as e:
             print("[Fehler bei elaborate_ban_reason]", e)
-            # Fallback:
             return (
                 f"Dein Banngrund lautet: {reason}. "
                 "Wir möchten dich bitten, es ernst zu nehmen und uns zu erläutern, weshalb es dazu kam."
@@ -604,7 +599,6 @@ class TicketCog(commands.Cog):
          - Verweise nicht auf fertige Entschuldigungen
         """
         conversation = self.conversations[channel_id]
-
         system_msg = {
             "role": "system",
             "content": (
@@ -617,19 +611,17 @@ class TicketCog(commands.Cog):
             )
         }
 
-        recent = conversation[-10:]  # nur die letzten 10 Nachrichten
+        recent = conversation[-10:]
         messages_for_openai = [system_msg] + recent
-
         loop = asyncio.get_running_loop()
 
         def sync_call():
-            response = self.openai_client.chat.completions.create(
+            return self.openai_client.chat.completions.create(
                 model=self.openai_model,
                 messages=messages_for_openai,
                 max_tokens=self.openai_max_tokens,
                 temperature=self.openai_temp
             )
-            return response
 
         response = await loop.run_in_executor(None, sync_call)
         ai_text = response.choices[0].message.content.strip()
@@ -645,23 +637,23 @@ class TicketCog(commands.Cog):
 
     def is_sufficient_explanation(self, user_text: str, guild: discord.Guild) -> bool:
         """
-        Prüft, ob der Nutzer 'ausreichend' erklärt hat (z.B. >=10 Wörter
-        und 'weil' oder 'ich habe' etc.), um an Admin/Support zu verweisen.
-        (Stark vereinfacht!)
+        Prüft, ob der Nutzer 'ausreichend' erklärt hat.
+        (Stark vereinfacht: >=10 Wörter und 'weil' oder 'ich habe')
         """
         words = user_text.strip().split()
         if len(words) >= 10 and ("weil" in user_text.lower() or "ich habe" in user_text.lower()):
             return True
         return False
 
-    def has_support_role(self, member: discord.Member):
-        """True, wenn Member Admin oder Support ist."""
-        support_id = config.SUPPORT_ROLE_ID
-        admin_id = config.ADMIN_ROLE_ID
+    def has_support_role(self, member: discord.Member) -> bool:
+        """Gibt True zurück, wenn der Member Support- oder Admin-Rolle hat."""
+        support_id = config.SUPPORT_ROLE_ID  # int
+        admin_id = config.ADMIN_ROLE_ID      # int
         return any(r.id == support_id for r in member.roles) \
             or any(r.id == admin_id for r in member.roles)
 
-    def is_ticket_channel(self, channel: discord.TextChannel):
+    def is_ticket_channel(self, channel: discord.TextChannel) -> bool:
+        """Prüft, ob der Channel in einer der Ticket-Kategorien ist."""
         if not channel.category:
             return False
         cat_id = channel.category.id
@@ -672,10 +664,7 @@ class TicketCog(commands.Cog):
         ]
 
     async def fetch_detail_data(self, pid: str):
-        """
-        Liest http://api.hackletloose.eu/detail/<pid>,
-        gibt bei 200 JSON, sonst None zurück.
-        """
+        """Liest http://api.hackletloose.eu/detail/<pid>, gibt bei 200 JSON, sonst None zurück."""
         url = f"http://api.hackletloose.eu/detail/{pid}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:

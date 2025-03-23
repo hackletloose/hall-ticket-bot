@@ -1,4 +1,3 @@
-# utils/config.py
 import os
 from dotenv import load_dotenv
 
@@ -10,10 +9,12 @@ if not BOT_TOKEN:
 
 # Bereits vorhandene Variablen
 GUILD_ID = int(os.getenv("GUILD_ID", "0"))
-SUPPORT_ROLE_ID = os.getenv("SUPPORT_ROLE_ID", "0")
-ADMIN_ROLE_ID = os.getenv("ADMIN_ROLE_ID", "0")
-VIEWER_ROLE_ID = os.getenv("VIEWER_ROLE_ID", "0")
-VIEWER2_ROLE_ID = os.getenv("VIEWER2_ROLE_ID", "0")
+
+# Rollen-IDs als INTEGER (für den Bot)
+SUPPORT_ROLE_ID = int(os.getenv("SUPPORT_ROLE_ID", "0"))
+ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
+VIEWER_ROLE_ID = int(os.getenv("VIEWER_ROLE_ID", "0"))
+VIEWER2_ROLE_ID = int(os.getenv("VIEWER2_ROLE_ID", "0"))
 
 CREATED_TICKETS_CATEGORY_ID = int(os.getenv("CREATED_TICKETS_CATEGORY_ID", "0"))
 CLAIMED_TICKETS_CATEGORY_ID = int(os.getenv("CLAIMED_TICKETS_CATEGORY_ID", "0"))
@@ -36,11 +37,11 @@ DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "")
 
-# Da wir nur String-Vergleiche brauchen, konvertieren wir Rollen zu Strings:
-# (Discord liefert Rollen als Strings, also "11111111", etc.)
+# Für die FLASK-Webapp werden die Rollennamen/IDs als Strings verglichen.
+# Daher konvertieren wir HIER die integer-IDs nochmal zu Strings.
 ALLOWED_ROLES = [
-    SUPPORT_ROLE_ID.strip(),
-    ADMIN_ROLE_ID.strip(),
-    VIEWER_ROLE_ID.strip(),
-    VIEWER2_ROLE_ID.strip()
+    str(SUPPORT_ROLE_ID),
+    str(ADMIN_ROLE_ID),
+    str(VIEWER_ROLE_ID),
+    str(VIEWER2_ROLE_ID)
 ]

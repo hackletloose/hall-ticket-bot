@@ -1,4 +1,5 @@
 # webapp/app.py
+
 from flask import (
     Flask, render_template, request, redirect,
     url_for, flash, g, session
@@ -68,7 +69,6 @@ def callback():
         flash("Discord-Login abgebrochen (kein code).")
         return redirect(url_for("login"))
 
-    # 1) Token holen
     data = {
         "client_id": config.DISCORD_CLIENT_ID,
         "client_secret": config.DISCORD_CLIENT_SECRET,
@@ -87,7 +87,6 @@ def callback():
     access_token = token_json["access_token"]
     token_type = token_json["token_type"]  # "Bearer"
 
-    # 2) User-Infos
     user_res = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"{token_type} {access_token}"}
@@ -99,8 +98,7 @@ def callback():
     user_data = user_res.json()
     user_id = user_data["id"]
 
-    # 3) Guild Member Info
-    guild_id = config.GUILD_ID  # int
+    guild_id = config.GUILD_ID
     member_url = f"https://discord.com/api/users/@me/guilds/{guild_id}/member"
     member_res = requests.get(member_url, headers={"Authorization": f"{token_type} {access_token}"})
 
@@ -109,15 +107,13 @@ def callback():
         return redirect(url_for("login"))
 
     member_data = member_res.json()
-    user_roles = member_data.get("roles", [])  # Liste von Rollen-IDs als Strings
+    user_roles = member_data.get("roles", [])
 
-    # 4) Prüfen, ob mind. 1 Rolle mit ALLOWED_ROLES übereinstimmt
     roles_ok = any(r in user_roles for r in config.ALLOWED_ROLES)
     if not roles_ok:
         flash("Du hast keine der erforderlichen Rollen. Zugriff verweigert.")
         return redirect(url_for("login"))
 
-    # 5) Session speichern
     session["discord_id"] = user_id
     session["roles_ok"] = True
     flash("Erfolgreich eingeloggt.")
@@ -128,8 +124,9 @@ def callback():
 def index():
     con = get_db()
     cur = con.cursor()
+    # Neu: user_name (Index 2) wird mit ausgewählt
     cur.execute("""
-        SELECT t.id, t.user_id, t.status, tr.created_at
+        SELECT t.id, t.user_id, t.user_name, t.status, tr.created_at
         FROM tickets t
         JOIN transcripts tr ON t.id = tr.ticket_id
         GROUP BY t.id
