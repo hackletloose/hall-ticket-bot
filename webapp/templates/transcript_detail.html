@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="de" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <title>Ticket #{{ ticket_id }} - Transkript</title>
+
+  <!-- Bootstrap (lokal) -->
+  <link
+    rel="stylesheet"
+    href="{{ url_for('static', filename='css/bootstrap.min.css') }}"
+  />
+  <!-- Bootstrap Icons (CDN) -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css"
+  />
+
+  <style>
+    /***********************************************
+    *  Nur Dark Theme mit „schickem“ Verlauf
+    ***********************************************/
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: linear-gradient(135deg, #1f1c2c 0%, #302b63 50%, #24243e 100%) no-repeat center center fixed;
+      background-size: cover;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: #f8f9fa;
+      overflow-x: hidden;
+    }
+
+    :root[data-bs-theme="dark"] {
+      --bs-body-bg: transparent; 
+      --bs-body-color: #f8f9fa;
+      --bs-card-bg: rgba(35, 37, 38, 0.7);
+      --bs-card-color: #f8f9fa;
+      --bs-card-border-color: rgba(255,255,255,0.1);
+      --bs-border-color-translucent: rgba(255,255,255,0.15);
+    }
+
+    nav.navbar {
+      background-color: rgba(0, 0, 0, 0.6) !important; 
+      backdrop-filter: blur(6px);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+
+    /* Fade-in Animation */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    #mainContent {
+      animation: fadeIn 0.7s ease-out;
+    }
+
+    /* Card-Optik fürs Transkript */
+    .card {
+      margin-top: 2rem;
+      margin-bottom: 2rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--bs-card-border-color);
+      background-color: var(--bs-card-bg);
+      backdrop-filter: blur(6px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .card-header {
+      border-bottom: 1px solid var(--bs-border-color-translucent);
+    }
+
+    .transcript-container {
+      white-space: pre-wrap;
+      font-family: monospace;
+      min-height: 100px;
+      background-color: rgba(255,255,255,0.07);
+      border: 1px solid var(--bs-border-color-translucent);
+      border-radius: 4px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      overflow-x: auto;
+    }
+
+    /* Button-Gruppe (Kopieren/Drucken/Download) */
+    .transcript-actions .btn {
+      margin-right: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    .transcript-actions .btn:hover {
+      opacity: 0.9;
+    }
+
+    /* Toast-Container (falls Kopier-Feedback) */
+    #toastContainer {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 9999;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold d-flex align-items-center" href="{{ url_for('index') }}">
+      <i class="bi bi-card-checklist me-2"></i>Ticket-Übersicht
+    </a>
+  </div>
+</nav>
+
+<div id="toastContainer"></div>
+
+<div class="container" id="mainContent">
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <div class="alert alert-warning mt-3" role="alert">
+        {% for message in messages %}
+          <div>{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <div class="card">
+    <div class="card-header bg-primary text-white">
+      <h4 class="mb-0">
+        <i class="bi bi-file-earmark-text me-2"></i>
+        Transkript zu Ticket #{{ ticket_id }}
+      </h4>
+    </div>
+    <div class="card-body">
+      <!-- Kopieren / Drucken / Download -->
+      <div class="transcript-actions mb-3">
+        <button
+          class="btn btn-outline-light btn-sm"
+          onclick="copyTranscript()"
+        >
+          <i class="bi bi-clipboard"></i> Kopieren
+        </button>
+        <button
+          class="btn btn-outline-light btn-sm"
+          onclick="printTranscript()"
+        >
+          <i class="bi bi-printer"></i> Drucken
+        </button>
+        <button
+          class="btn btn-outline-light btn-sm"
+          onclick="downloadAsText()"
+        >
+          <i class="bi bi-download"></i> Download
+        </button>
+      </div>
+
+      <div class="transcript-container" id="transcriptContent">
+        {{ transcript }}
+      </div>
+
+      <a href="{{ url_for('index') }}" class="btn btn-primary">
+        <i class="bi bi-arrow-left"></i> Zurück zur Übersicht
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- Bootstrap JS-Bundle -->
+<script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+<script>
+  function copyTranscript() {
+    const transcriptText = document.getElementById("transcriptContent").innerText;
+    navigator.clipboard.writeText(transcriptText).then(() => {
+      showToast("Transkript kopiert!");
+    }, () => {
+      showToast("Fehler beim Kopieren!", true);
+    });
+  }
+  function printTranscript() {
+    window.print();
+  }
+  function downloadAsText() {
+    const transcriptText = document.getElementById("transcriptContent").innerText;
+    const blob = new Blob([transcriptText], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "ticket_{{ ticket_id }}_transcript.txt";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  // Einfache Bootstrap Toast-Funktion
+  function showToast(message, isError=false) {
+    const toastContainer = document.getElementById("toastContainer");
+    const toastId = "toast-" + Date.now();
+    const toastEl = document.createElement("div");
+    toastEl.classList.add("toast", "border-0");
+    toastEl.id = toastId;
+    toastEl.setAttribute("role", "alert");
+    toastEl.setAttribute("aria-live", "assertive");
+    toastEl.setAttribute("aria-atomic", "true");
+
+    if (isError) {
+      toastEl.innerHTML = `
+        <div class="toast-header bg-danger text-white">
+          <strong class="me-auto">Fehler</strong>
+          <button type="button" class="btn-close btn-close-white ms-2 mb-1" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body">
+          ${message}
+        </div>
+      `;
+    } else {
+      toastEl.innerHTML = `
+        <div class="toast-header bg-success text-white">
+          <strong class="me-auto">Erfolg</strong>
+          <button type="button" class="btn-close btn-close-white ms-2 mb-1" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body">
+          ${message}
+        </div>
+      `;
+    }
+    toastContainer.appendChild(toastEl);
+
+    const toast = new bootstrap.Toast(toastEl, { delay: 2500 });
+    toast.show();
+    toastEl.addEventListener("hidden.bs.toast", () => {
+      toastEl.remove();
+    });
+  }
+</script>
+</body>
+</html>

@@ -1,6 +1,5 @@
-py-cord==2.3.2
-python-dotenv==0.21.0
-
-# Alternativ (falls du statt py-cord lieber nextcord oder disnake verwenden möchtest):
-# nextcord==2.2.0
-# disnake==2.6.0
+py-cord
+python-dotenv
+Flask
+requests
+gunicorn
