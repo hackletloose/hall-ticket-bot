@@ -1,5 +1,3 @@
-Nachfolgend findest du eine vollständige **README.md** (in deutscher Sprache), die neben dem Aufbau und der Konfiguration deines Projekts nun auch die notwendigen Schritte im [Discord Developer Portal](https://discord.com/developers/applications) beschreibt, um deinen Bot zu erstellen und korrekt einzubinden.
-
 ---
 
 # Ticket-Bot & Web-Panel (Discord + Flask)
