@@ -2,7 +2,7 @@
 
 # Ticket-Bot & Web-Panel (Discord + Flask)
 
-Dies ist ein Discord-Ticket-Bot mit integrierter KI-Unterstützung (OpenAI GPT-3.5). Der Bot ermöglicht Nutzer\*innen, über einen Button ein Ticket zu eröffnen, woraufhin eine „Sekretärin Sigrid“ (KI) direkt im Channel erste Fragen stellt und entscheidet, ob der/die Nutzer\*in kooperativ ist. Anschließend kann das Support-/Admin-Team das Ticket übernehmen, bearbeiten, schließen oder löschen.  
+Dies ist ein Discord-Ticket-Bot mit integrierter KI-Unterstützung (OpenAI GPT-4o-mini). Der Bot ermöglicht Nutzer\*innen, über einen Button ein Ticket zu eröffnen, woraufhin eine „Sekretärin Sigrid“ (KI) direkt im Channel erste Fragen stellt und entscheidet, ob der/die Nutzer\*in kooperativ ist. Anschließend kann das Support-/Admin-Team das Ticket übernehmen, bearbeiten, schließen oder löschen.  
 
 Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Discord-OAuth2-Login), die Übersichten und Transkripte der Tickets anzeigt.
 
