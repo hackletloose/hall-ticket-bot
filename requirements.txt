@@ -1,5 +1,6 @@
 py-cord
-python-dotenv
-Flask
+openai
+flask
 requests
-gunicorn
+python-dotenv
+aiohttp
