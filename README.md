@@ -1,8 +1,6 @@
----
-
 # Ticket-Bot & Web-Panel (Discord + Flask)
 
-Dies ist ein Discord-Ticket-Bot mit integrierter KI-Unterstützung (OpenAI GPT-4o-mini). Der Bot ermöglicht Nutzer\*innen, über einen Button ein Ticket zu eröffnen, woraufhin eine „Sekretärin Sigrid“ (KI) direkt im Channel erste Fragen stellt und entscheidet, ob der/die Nutzer\*in kooperativ ist. Anschließend kann das Support-/Admin-Team das Ticket übernehmen, bearbeiten, schließen oder löschen.  
+Dies ist ein Discord-Ticket-Bot mit integrierter KI-Unterstützung (OpenAI **GPT-4o-mini**). Der Bot ermöglicht Nutzer\*innen, über einen Button ein Ticket zu eröffnen, woraufhin eine „Sekretärin Sigrid“ (KI) direkt im Channel erste Fragen stellt und entscheidet, ob der/die Nutzer\*in kooperativ ist. Anschließend kann das Support-/Admin-Team das Ticket übernehmen, bearbeiten, schließen oder löschen.  
 
 Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Discord-OAuth2-Login), die Übersichten und Transkripte der Tickets anzeigt.
 
@@ -20,6 +18,7 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
    5. [Slash Commands](#slash-commands)  
 4. [Projektstruktur](#projektstruktur)  
 5. [Installation & Konfiguration](#installation--konfiguration)  
+   1. [GPT-4o-mini-API-Key beschaffen](#gpt-4o-mini-api-key-beschaffen)  
 6. [Start des Discord-Bots (lokal)](#start-des-discord-bots-lokal)  
 7. [Start des Flask-Webservers (lokal)](#start-des-flask-webservers-lokal)  
 8. [Produktivbetrieb](#produktivbetrieb)  
@@ -35,7 +34,7 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 ## Funktionsübersicht
 
 - **Ticket-Erstellung** via Button in Discord-Kanälen.  
-- **KI-Unterstützung**: Stellt anfangs Fragen (z. B. nach einer Bann-ID) und prüft Kooperationsbereitschaft.  
+- **KI-Unterstützung** (GPT-4o-mini): Stellt anfangs Fragen (z. B. nach einer Bann-ID) und prüft Kooperationsbereitschaft.  
 - **Manuelles Claiming**: Supporter/Admins können Tickets beanspruchen, schreiben und den User direkt betreuen.  
 - **Abschluss**: Ticket schließen (Archiv in „Closed“-Kategorie, Transkript wird gespeichert) oder Ticket löschen (Kanal weg, Transkript bleibt in der Datenbank).  
 - **Web-Panel** (Flask) mit Discord-OAuth2-Anmeldung, um Ticketlisten und Transkripte einzusehen.
@@ -46,23 +45,23 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 
 - **Python 3.9** oder höher (empfohlen).  
 - **Discord-Bot** (Client-ID, Bot-Token) – Anlegen und konfigurieren siehe unten.  
-- **OpenAI-API-Key** (für GPT-4o-mini).  
+- **GPT-4o-mini-API-Key** (oder ein kompatibles GPT-4o-mini-Zugangstoken).  
 - **SQLite** (in Python enthalten).  
-- Python-Bibliotheken wie `discord.py`/`py-cord`, `openai`, `flask`, `requests`, `python-dotenv`, `aiohttp`.  
+- Python-Bibliotheken wie `discord.py`, `openai`, `flask`, `requests`, `python-dotenv`, `aiohttp` – in bestimmten (aktuellen) Versionen.  
 - (Optional) `gunicorn` für einen produktiven Betrieb der Flask-App.
 
 ---
 
 ## Discord Developer Portal: Bot erstellen & einrichten
 
-### 1. Neue Application erstellen
+### Neue Application erstellen
 
 1. Gehe zum [Discord Developer Portal](https://discord.com/developers/applications).  
 2. Klicke auf **New Application**.  
-3. Gib einen Namen für deine Anwendung ein, z. B. „TicketBot“.  
+3. Gib einen Namen für deine Anwendung ein, z. B. „TicketBot“.  
 4. Klicke auf **Create**.
 
-### 2. Bot anlegen
+### Bot anlegen
 
 1. Wähle deine neue Anwendung aus.  
 2. Gehe links auf **Bot**.  
@@ -71,26 +70,26 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 5. Kopiere unter **TOKEN** deinen **Bot-Token** (dieser muss in deiner `.env` unter `BOT_TOKEN=` eingetragen werden!).  
 6. (Optional) Passe das **Bot-Icon** und den **Benutzernamen** an.
 
-### 3. Privileged Gateway Intents
+### Privileged Gateway Intents
 
 1. In der Bot-Seite (im Developer Portal) scrolle zu **Privileged Gateway Intents**.  
 2. Aktiviere ggf. **Message Content Intent**, wenn du benötigst, dass dein Bot Nachrichteninhalte lesen kann (hier im Code ist `message_content = True` gesetzt, also wird das benötigt).  
 3. Aktiviere ggf. auch **Presence Intent** oder **Server Members Intent** falls du das brauchst (hier ggf. nur `members` relevant).  
 4. Klicke auf **Save Changes**.
 
-### 4. Bot einladen (Invite-Link)
+### Bot einladen (Invite-Link)
 
 1. Gehe links auf **OAuth2 > URL Generator**.  
 2. Wähle unter **Scopes**: `bot` & `applications.commands` (für Slash-Befehle).  
-3. Unter **Bot Permissions** wähle die nötigen Rechte (z. B. `Send Messages`, `Manage Channels`, `Manage Roles` – je nachdem, welche Aktionen dein Bot ausführen muss, insb. um Tickets zu erstellen oder Rechte zu setzen).  
+3. Unter **Bot Permissions** wähle die nötigen Rechte (z. B. `Send Messages`, `Manage Channels`, `Manage Roles` – je nachdem, welche Aktionen dein Bot ausführen muss, insb. um Tickets zu erstellen oder Rechte zu setzen).  
 4. Der generierte Link (unten) kann jetzt kopiert und im Browser aufgerufen werden.  
 5. Wähle den Server, auf dem der Bot hinzugefügt werden soll, und bestätige.  
 
-Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte hat, die er braucht (z. B. um Channels zu erstellen).
+Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte hat, die er braucht (z. B. um Channels zu erstellen).
 
-### 5. Slash Commands
+### Slash Commands
 
-- Standardmäßig registriert Discord Slash-Befehle automatisch, wenn du sie in deinem Code (z. B. in `ticket_cog.py` oder `transcript_cog.py`) definiert hast.  
+- Standardmäßig registriert Discord Slash-Befehle automatisch, wenn du sie in deinem Code (z. B. in `ticket_cog.py` oder `transcript_cog.py`) definiert hast.  
 - Stelle sicher, dass in den Bot-Einstellungen unter **General Information** das Feld **Public Bot** (ggf. an) und die Intents korrekt gesetzt sind, damit Slash Commands ordnungsgemäß ankommen.  
 - Manchmal kann es mehrere Minuten dauern, bis neue Slash Commands im Server verfügbar sind.
 
@@ -133,18 +132,20 @@ Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte h
    ```
 
 3. **Abhängigkeiten installieren**  
+   Wenn deine `requirements.txt` bereits existiert, führe aus:
    ```bash
    pip install -r requirements.txt
    ```
-   Wenn keine `requirements.txt` vorliegt, erstelle eine mit ähnlichem Inhalt:
-   ```
-   discord.py==2.1.0
-   openai==0.27.0
-   flask==2.3.2
+   Eine Beispiel-**`requirements.txt`** mit aktuellen Versionsangaben könnte so aussehen (Stand 2025+ fiktiv):
+
+   ```text
+   discord.py==2.3.2
+   openai==0.29.0
+   flask==2.3.3
    requests==2.31.0
    python-dotenv==1.0.0
-   aiohttp==3.8.4
-   gunicorn==20.1.0   # nur falls benötigt
+   aiohttp==3.8.5
+   gunicorn==20.1.0
    ```
 
 4. **Konfiguration in `.env`**  
@@ -166,20 +167,29 @@ Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte h
    MAX_TICKETS_PER_SUPPORTER=3
    TICKET_CLEANUP_DAYS=7
 
+   # Hier den GPT-4o-mini-Key (bzw. OpenAI-kompatiblen Key) eintragen:
    OPENAI_API_KEY=sk-...
    OPENAI_MODEL=gpt-4o-mini
 
-   # Flask WebApp
+   # Flask WebApp (Discord OAuth2)
    FLASK_SECRET_KEY=EinLangerGeheimerString
    DISCORD_CLIENT_ID=1234567890
    DISCORD_CLIENT_SECRET=ABCDEFGHIJKLMNOPQRST
    DISCORD_REDIRECT_URI=https://deine-app.de/callback
    ```
-   **Wichtig**:
-   - Trage deinen eigenen Bot-Token (`BOT_TOKEN`) aus dem Developer Portal ein.  
-   - Die IDs (`GUILD_ID`, `SUPPORT_ROLE_ID` usw.) müssen deinen Server/Rollen widerspiegeln.  
-   - `OPENAI_API_KEY` ist dein Key für die GPT-3.5-API.  
-   - Die Discord OAuth2-Daten (`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`) sind für die Web-App-Anmeldung relevant.
+
+---
+
+### GPT-4o-mini-API-Key beschaffen
+
+Je nachdem, wie oder wo du GPT-4o-mini verwendest (z. B. lokal gehostet, per Proxy oder über einen Drittanbieter), benötigst du einen gültigen **API-Key** oder ein Zugangstoken. 
+
+1. **Account / Projekt erstellen** beim Anbieter, der GPT-4o-mini bereitstellt, oder deine eigene Instanz konfigurieren.  
+2. **API-Schlüssel** generieren oder abrufen (z. B. „Secret Key“).  
+3. Diesen Schlüssel in der `.env` unter `OPENAI_API_KEY` eintragen (oder einer anderen Variable, falls du den Code entsprechend anpasst).  
+4. Überprüfe außerdem, ob du in `OPENAI_MODEL` statt `gpt-3.5-turbo` den Modellnamen `gpt-4o-mini` nutzt (oder wie dein Modell genau heißt).
+
+Beachte die jeweiligen **Nutzungsbedingungen** und möglichen **Kosten** (z. B. pro Anfrage). 
 
 ---
 
@@ -234,7 +244,7 @@ Im produktiven Umfeld empfiehlt es sich, den Discord-Bot (`main.py`) als **Syste
 
 ### Systemd-Service für main.py (Discord-Bot)
 
-Lege eine Service-Datei an, z. B. `/etc/systemd/system/discord_ticketbot.service`:
+Lege eine Service-Datei an, z. B. `/etc/systemd/system/discord_ticketbot.service`:
 
 ```ini
 [Unit]
@@ -262,7 +272,7 @@ sudo systemctl status discord_ticketbot
 
 ### Systemd-Service für Gunicorn (Webapp)
 
-Lege eine zweite Service-Datei an, z. B. `/etc/systemd/system/ticketweb_gunicorn.service`:
+Lege eine zweite Service-Datei an, z. B. `/etc/systemd/system/ticketweb_gunicorn.service`:
 
 ```ini
 [Unit]
@@ -314,7 +324,7 @@ Anschließend kannst du Let's Encrypt oder ein anderes SSL-Zertifikat aktivieren
 
 1. **Slash-Befehl: `/setup_ticket_button`**  
    - Nur für Admin-Rolle (`ADMIN_ROLE_ID`).  
-   - Erstellt eine Nachricht mit „Ticket erstellen“-Button im aktuellen Channel.
+   - Erstellt eine Nachricht mit „Ticket erstellen“-Button im aktuellen Kanal.
 
 2. **Ticket-Kanal**  
    - Klick → Neuer Textkanal in Kategorie `CREATED_TICKETS_CATEGORY_ID`.  
@@ -330,7 +340,7 @@ Anschließend kannst du Let's Encrypt oder ein anderes SSL-Zertifikat aktivieren
    - Button: „Ticket löschen“ → Kanal wird gelöscht, Transkript bleibt in der Datenbank.  
 
 6. **`/ticket_transcript`**  
-   - Erstellt / aktualisiert Transkript manuell (nur Supporter/Admin).
+   - Erstellt / aktualisiert ein Transkript manuell (nur Supporter/Admin).
 
 ---
 
@@ -344,9 +354,9 @@ Anschließend kannst du Let's Encrypt oder ein anderes SSL-Zertifikat aktivieren
 
 ## Lizenz / Hinweise
 
-- Dieses Projekt nutzt Abhängigkeiten mit eigenen Lizenzen (Discord, OpenAI, Flask etc.). Prüfe deren Bestimmungen.  
-- Achte auf die **Nutzungsrichtlinien** von Discord und OpenAI.  
-- Du kannst den Code an deine eigenen Bedürfnisse anpassen.
+- Dieses Projekt nutzt Abhängigkeiten mit eigenen Lizenzen (Discord, GPT-4o-mini/OpenAI, Flask etc.). Prüfe deren Bestimmungen.  
+- Achte auf die **Nutzungsrichtlinien** von Discord und deinem GPT-4o-mini-Anbieter (z. B. Abrechnungsmodelle, verbotene Inhalte etc.).  
+- Du kannst den Code frei anpassen und erweitern.
 
 ---
 
