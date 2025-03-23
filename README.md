@@ -46,7 +46,7 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 
 - **Python 3.9** oder höher (empfohlen).  
 - **Discord-Bot** (Client-ID, Bot-Token) – Anlegen und konfigurieren siehe unten.  
-- **OpenAI-API-Key** (für GPT-3.5).  
+- **OpenAI-API-Key** (für GPT-4o-mini).  
 - **SQLite** (in Python enthalten).  
 - Python-Bibliotheken wie `discord.py`/`py-cord`, `openai`, `flask`, `requests`, `python-dotenv`, `aiohttp`.  
 - (Optional) `gunicorn` für einen produktiven Betrieb der Flask-App.
