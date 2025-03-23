@@ -167,7 +167,7 @@ Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte h
    TICKET_CLEANUP_DAYS=7
 
    OPENAI_API_KEY=sk-...
-   OPENAI_MODEL=gpt-3.5-turbo
+   OPENAI_MODEL=gpt-4o-mini
 
    # Flask WebApp
    FLASK_SECRET_KEY=EinLangerGeheimerString
