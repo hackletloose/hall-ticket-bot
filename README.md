@@ -139,13 +139,13 @@ Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte h
    Eine Beispiel-**`requirements.txt`** mit aktuellen Versionsangaben könnte so aussehen (Stand 2025+ fiktiv):
 
    ```text
-   discord.py==2.3.2
-   openai==0.29.0
-   flask==2.3.3
-   requests==2.31.0
-   python-dotenv==1.0.0
-   aiohttp==3.8.5
-   gunicorn==20.1.0
+   discord.py
+   openai
+   flask
+   requests
+   python-dotenv
+   aiohttp
+   gunicorn
    ```
 
 4. **Konfiguration in `.env`**  
