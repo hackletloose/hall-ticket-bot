@@ -57,7 +57,7 @@ class TicketCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print("[LOG] [TicketCog] Ticket-Cog ist bereit.")
+        print("[LOG] [TicketCog] Ticket-Cog ist bereit. (on_ready in TicketCog)")
 
     @commands.slash_command(
         name="setup_ticket_button",
@@ -65,6 +65,7 @@ class TicketCog(commands.Cog):
     )
     @commands.has_role(config.ADMIN_ROLE_ID)  # <-- Integer Check
     async def setup_ticket_button(self, ctx: discord.ApplicationContext):
+        print("[LOG] Slash-Befehl '/setup_ticket_button' wurde aufgerufen.")
         embed = discord.Embed(
             title="Ticket-Hilfe",
             description=(

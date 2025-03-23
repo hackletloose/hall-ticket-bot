@@ -91,6 +91,28 @@ async def on_ready():
     )
 
     print("[LOG] Automatisches Setzen der Kategorie-Berechtigungen abgeschlossen.")
+    
+    # ---------------------------------------
+    # NEUES LOG: Slash-Befehle registrieren
+    # ---------------------------------------
+    try:
+        # In Pycord: Slash-Befehle werden per bot.sync_commands() synchronisiert
+        synced = await bot.sync_commands()
+
+        # Neuere Pycord-Version => synced kann None sein
+        if synced is None:
+            print("[LOG] Slash-Befehle wurden erfolgreich synchronisiert (sync_commands() => None).")
+            print("[LOG] Registrierte Slash-Befehle:")
+            for cmd in bot.application_commands:
+                print(f"   - /{cmd.name}")
+        else:
+            # Bei älteren Versionen kann synced eine Liste sein
+            print(f"[LOG] {len(synced)} Slash-Befehle wurden erfolgreich registriert:")
+            for cmd in synced:
+                print(f"   - /{cmd.name}")
+    except Exception as e:
+        print(f"[ERROR] Fehler beim Syncen der Slash-Befehle: {e}")
+
     print("------")
 
 async def fix_category_perms(
