@@ -1,14 +1,15 @@
 # utils/database.py
+
 import sqlite3
-import os
 
 class Database:
     def __init__(self):
-        # Erstelle Tabellen (falls nicht vorhanden), ohne globale Connection zu behalten
+        # Erstelle Tabellen (falls nicht vorhanden)
         self._create_tables()
 
     def _create_tables(self):
         with sqlite3.connect("tickets.sqlite") as conn:
+            # Tabelle tickets
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tickets (
                     id INTEGER PRIMARY KEY,
@@ -16,9 +17,12 @@ class Database:
                     channel_id TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     status TEXT DEFAULT 'open',
-                    claimed_by TEXT
+                    claimed_by TEXT,
+                    user_name TEXT
                 );
             """)
+
+            # Tabelle transcripts
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS transcripts (
                     transcript_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,16 +32,39 @@ class Database:
                 );
             """)
 
-            # --- Neu: Spalte user_name hinzufügen, falls sie noch nicht existiert ---
-            # Wir probieren einfach ein ALTER TABLE und fangen einen Fehler ab.
-            try:
-                conn.execute("ALTER TABLE tickets ADD COLUMN user_name TEXT;")
-            except sqlite3.OperationalError:
-                # Falls schon existiert, ignorieren wir den Fehler.
-                pass
+            # Neue Tabelle bot_settings - Key/Value
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS bot_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            """)
 
             conn.commit()
 
+    ########################################################################
+    # Bot-Settings: key-value
+    ########################################################################
+    def save_bot_setting(self, key: str, value: str):
+        with sqlite3.connect("tickets.sqlite") as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)",
+                (key, value)
+            )
+            conn.commit()
+
+    def get_bot_setting(self, key: str):
+        with sqlite3.connect("tickets.sqlite") as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM bot_settings WHERE key=?", (key,))
+            row = cur.fetchone()
+            if row:
+                return row[0]
+        return None
+
+    ########################################################################
+    # Ticket-Logik
+    ########################################################################
     def get_next_ticket_id(self):
         with sqlite3.connect("tickets.sqlite") as conn:
             cur = conn.cursor()

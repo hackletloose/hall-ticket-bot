@@ -1,3 +1,5 @@
+# cogs/ticket_cog.py
+
 import discord
 from discord.ext import commands
 import re
@@ -8,6 +10,52 @@ import unicodedata
 from collections import defaultdict
 
 from utils import config, database
+
+##############################################################################
+# Klassendefinitionen
+##############################################################################
+
+class CreateTicketView(discord.ui.View):
+    """
+    View mit einem Button "Ticket erstellen".
+    Beim Klick rufen wir 'create_ticket_callback' auf,
+    die auf das Cog selbst zugreift.
+    """
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Ticket erstellen", style=discord.ButtonStyle.danger)
+    async def create_ticket_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.cog.create_ticket(interaction)
+        # Optional: Button nach Klick deaktivieren, um Spam zu vermeiden
+        # button.disabled = True
+        # await interaction.edit_original_response(view=self)
+
+
+class TicketAdminView(discord.ui.View):
+    """
+    View mit den drei Buttons "Ticket beanspruchen", "Ticket schließen", "Ticket löschen".
+    """
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Ticket beanspruchen", style=discord.ButtonStyle.success)
+    async def claim_ticket_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.cog.claim_ticket(interaction)
+
+    @discord.ui.button(label="Ticket schließen", style=discord.ButtonStyle.danger)
+    async def close_ticket_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.cog.close_ticket(interaction)
+
+    @discord.ui.button(label="Ticket löschen", style=discord.ButtonStyle.danger)
+    async def delete_ticket_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        await self.cog.delete_ticket(interaction)
+
+##############################################################################
+# Hilfsfunktionen
+##############################################################################
 
 def safe_truncate(text: str, max_chars: int) -> str:
     """
@@ -27,6 +75,10 @@ def normalize_id_string(text: str) -> str:
         if not unicodedata.category(c).startswith('C'):
             cleaned.append(c)
     return "".join(cleaned)
+
+##############################################################################
+# Haupt-Cog: TicketCog
+##############################################################################
 
 class TicketCog(commands.Cog):
     def __init__(self, bot):
@@ -50,7 +102,9 @@ class TicketCog(commands.Cog):
         self.uncooperative_count = defaultdict(int)
 
         # OpenAI Setup
-        self.openai_client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
+        # Ab openai>=1.0.0 sind die alten ChatCompletion.create-Aufrufe nicht mehr gültig
+        # => Daher nutzen wir openai.chat_completions.create(...)
+        openai.api_key = config.OPENAI_API_KEY
         self.openai_model = config.OPENAI_MODEL or "gpt-3.5-turbo"
         self.openai_temp = 0.7
         self.openai_max_tokens = 1000
@@ -59,12 +113,20 @@ class TicketCog(commands.Cog):
     async def on_ready(self):
         print("[LOG] [TicketCog] Ticket-Cog ist bereit. (on_ready in TicketCog)")
 
+    # ------------------------------------------------------------------------
+    # Slash-Befehl: /setup_ticket_button
+    # ------------------------------------------------------------------------
     @commands.slash_command(
         name="setup_ticket_button",
         description="Erstellt im aktuellen Kanal eine Nachricht mit einem Ticket-Button (nur Admin)."
     )
-    @commands.has_role(config.ADMIN_ROLE_ID)  # <-- Integer Check
+    @commands.has_role(config.ADMIN_ROLE_ID)  # Nur Admin
     async def setup_ticket_button(self, ctx: discord.ApplicationContext):
+        """
+        Legt eine neue Nachricht mit dem Ticket-Erstell-Button an
+        und speichert channel_id + message_id in der DB,
+        damit wir sie beim Bot-Neustart wiederverwenden können.
+        """
         print("[LOG] Slash-Befehl '/setup_ticket_button' wurde aufgerufen.")
         embed = discord.Embed(
             title="Ticket-Hilfe",
@@ -75,35 +137,31 @@ class TicketCog(commands.Cog):
             color=discord.Color.green()
         )
 
-        create_btn = discord.ui.Button(
-            label="Ticket erstellen",
-            style=discord.ButtonStyle.danger,
-            custom_id="create_ticket_button"
-        )
-        view = discord.ui.View()
-        view.add_item(create_btn)
+        view = CreateTicketView(self)
+        # Nachricht mit Button im Kanal platzieren
+        msg = await ctx.channel.send(embed=embed, view=view)
 
-        await ctx.channel.send(embed=embed, view=view)
-        await ctx.respond("Ticket-Button wurde platziert.", ephemeral=True)
-        print("[LOG] Ticket-Button wurde im Kanal platziert.")
+        # Channel/Message-ID in DB speichern,
+        # damit wir beim nächsten Neustart wieder denselben Button reaktivieren können
+        self.db.save_bot_setting("TICKET_BUTTON_CHANNEL_ID", str(ctx.channel.id))
+        self.db.save_bot_setting("TICKET_BUTTON_MESSAGE_ID", str(msg.id))
 
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction):
-        """Verwaltet Button-Interactions."""
-        if interaction.type == discord.InteractionType.component:
-            custom_id = interaction.data.get("custom_id", "")
-            if custom_id == "create_ticket_button":
-                await self.create_ticket(interaction)
-            elif custom_id.startswith("claim_ticket_"):
-                await self.claim_ticket(interaction)
-            elif custom_id.startswith("close_ticket_"):
-                await self.close_ticket(interaction)
-            elif custom_id.startswith("delete_ticket_"):
-                await self.delete_ticket(interaction)
+        # Slash-Befehl selbst ephemeral bestätigen
+        await ctx.respond("Ticket-Button wurde platziert und in der DB registriert.", ephemeral=True)
+        print(f"[LOG] Ticket-Button im Kanal {ctx.channel.id}, Nachricht {msg.id} gespeichert.")
 
+    # ------------------------------------------------------------------------
+    # create_ticket: Erzeugt ein Ticket, KI aktivieren, ...
+    # ------------------------------------------------------------------------
     async def create_ticket(self, interaction: discord.Interaction):
-        """Erstellt ein Ticket und aktiviert die KI im Kanal."""
-        await interaction.response.defer(ephemeral=True)
+        """
+        Erzeugt ein Ticket und aktiviert die KI im Kanal.
+        """
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.NotFound:
+            return
+
         user = interaction.user
         guild = interaction.guild
 
@@ -124,7 +182,7 @@ class TicketCog(commands.Cog):
                 print("[ERROR] Created-Tickets-Kategorie nicht gefunden.")
                 return
 
-            # Discord-Nick oder -Name
+            # Ggf. Nick statt globalem Username
             if isinstance(user, discord.Member) and user.nick:
                 user_name = user.nick
             else:
@@ -139,10 +197,12 @@ class TicketCog(commands.Cog):
             await ticket_channel.edit(sync_permissions=True)
             await ticket_channel.set_permissions(user, view_channel=True, send_messages=True)
 
+            # Viewer-Rolle (falls definiert)
             viewer_role = guild.get_role(config.VIEWER_ROLE_ID)
             if viewer_role:
                 await ticket_channel.set_permissions(viewer_role, view_channel=True, send_messages=False)
 
+            # Datenbank-Log
             self.db.log_ticket_created(ticket_id, user.id, user_name, ticket_channel.id)
 
             # KI aktivieren
@@ -158,25 +218,8 @@ class TicketCog(commands.Cog):
                 color=discord.Color.blue()
             )
 
-            claim_btn = discord.ui.Button(
-                label="Ticket beanspruchen",
-                style=discord.ButtonStyle.success,
-                custom_id=f"claim_ticket_{ticket_id}"
-            )
-            close_btn = discord.ui.Button(
-                label="Ticket schließen",
-                style=discord.ButtonStyle.danger,
-                custom_id=f"close_ticket_{ticket_id}"
-            )
-            delete_btn = discord.ui.Button(
-                label="Ticket löschen",
-                style=discord.ButtonStyle.danger,
-                custom_id=f"delete_ticket_{ticket_id}"
-            )
-            view = discord.ui.View()
-            view.add_item(claim_btn)
-            view.add_item(close_btn)
-            view.add_item(delete_btn)
+            # Admin/Support-Buttons (beanspruchen, schließen, löschen)
+            view = TicketAdminView(self)
 
             await ticket_channel.send(content=user.mention, embed=embed, view=view)
             print(f"[LOG] Ticket #{ticket_id} erstellt von {user.name} (ID: {user.id}).")
@@ -196,18 +239,26 @@ class TicketCog(commands.Cog):
         finally:
             self.creating_tickets_for.discard(user.id)
 
+    # ------------------------------------------------------------------------
+    # claim_ticket: Ticket beanspruchen
+    # ------------------------------------------------------------------------
     async def claim_ticket(self, interaction: discord.Interaction):
-        """Ticket beanspruchen -> KI bleibt an, Admin/Support darf schreiben."""
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            return
+
         if not self.has_support_role(interaction.user):
-            await interaction.response.send_message("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
+            await interaction.followup.send("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
             print(f"[LOG] {interaction.user.name} wollte ein Ticket claimen, hat aber keine Rechte.")
             return
-        await interaction.response.defer()
+
         channel = interaction.channel
         parts = channel.name.split("-")
         if len(parts) < 2:
             await interaction.followup.send("Dies scheint kein gültiger Ticket-Kanal zu sein.", ephemeral=True)
             return
+
         try:
             ticket_id = int(parts[-1])
         except ValueError:
@@ -221,7 +272,6 @@ class TicketCog(commands.Cog):
         guild = interaction.guild
         support_role = guild.get_role(config.SUPPORT_ROLE_ID)
         if support_role:
-            # Sperre die Schreibrechte für den gesamten Support-Rang
             await channel.set_permissions(support_role, send_messages=False)
 
         await channel.set_permissions(interaction.user, view_channel=True, send_messages=True)
@@ -245,18 +295,26 @@ class TicketCog(commands.Cog):
         await interaction.followup.send(f"Ticket #{ticket_id} wurde von {interaction.user.mention} beansprucht.", ephemeral=False)
         print(f"[LOG] Ticket #{ticket_id} wurde von {interaction.user.name} beansprucht.")
 
+    # ------------------------------------------------------------------------
+    # close_ticket: Ticket schließen
+    # ------------------------------------------------------------------------
     async def close_ticket(self, interaction: discord.Interaction):
-        """Ticket schließen -> KI aus, Archiv in Closed-Kategorie."""
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            return
+
         if not self.has_support_role(interaction.user):
-            await interaction.response.send_message("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
+            await interaction.followup.send("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
             print(f"[LOG] {interaction.user.name} wollte Ticket schließen, hat aber keine Rechte.")
             return
-        await interaction.response.defer()
+
         channel = interaction.channel
         parts = channel.name.split("-")
         if len(parts) < 2:
             await interaction.followup.send("Dies scheint kein gültiger Ticket-Kanal zu sein.", ephemeral=True)
             return
+
         try:
             ticket_id = int(parts[-1])
         except ValueError:
@@ -266,7 +324,7 @@ class TicketCog(commands.Cog):
         self.db.log_ticket_closed(ticket_id)
         await channel.send("Ticket wird geschlossen. Bitte hier nichts mehr schreiben.")
 
-        # Transkript
+        # Transkript speichern
         messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
         lines = []
         for msg in messages:
@@ -280,28 +338,35 @@ class TicketCog(commands.Cog):
         if closed_cat:
             await channel.edit(category=closed_cat, sync_permissions=True)
 
-        viewer_role = interaction.guild.get_role(config.VIEWER_ROLE_ID)
+        viewer_role = guild.get_role(config.VIEWER_ROLE_ID)
         if viewer_role:
             await channel.set_permissions(viewer_role, view_channel=True, send_messages=False)
 
-        # KI aus
         self.ai_enabled_for_channel[channel.id] = False
         await channel.send("Ticket ist nun geschlossen.")
         await interaction.followup.send(f"Ticket #{ticket_id} wurde geschlossen.", ephemeral=True)
         print(f"[LOG] Ticket #{ticket_id} wurde von {interaction.user.name} geschlossen.")
 
+    # ------------------------------------------------------------------------
+    # delete_ticket: Ticket löschen
+    # ------------------------------------------------------------------------
     async def delete_ticket(self, interaction: discord.Interaction):
-        """Ticket löschen -> KI aus, Kanal gelöscht."""
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.NotFound:
+            return
+
         if not self.has_support_role(interaction.user):
-            await interaction.response.send_message("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
+            await interaction.followup.send("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
             print(f"[LOG] {interaction.user.name} wollte Ticket löschen, hat aber keine Rechte.")
             return
-        await interaction.response.defer(ephemeral=True)
+
         channel = interaction.channel
         parts = channel.name.split("-")
         if len(parts) < 2:
             await interaction.followup.send("Dies scheint kein gültiger Ticket-Kanal zu sein.", ephemeral=True)
             return
+
         try:
             ticket_id = int(parts[-1])
         except ValueError:
@@ -327,9 +392,9 @@ class TicketCog(commands.Cog):
         await channel.delete()
         print(f"[LOG] Ticket #{ticket_id} wurde von {interaction.user.name} gelöscht.")
 
-    ########################################################################
-    # on_message: Kooperativ vs. unkooperativ per KI-Klassifikation + Logs
-    ########################################################################
+    ############################################################################
+    # on_message: KI-Logik (kooperativ/unkooperativ) + Banngrund-KI-Abfragen
+    ############################################################################
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
@@ -358,7 +423,7 @@ class TicketCog(commands.Cog):
         if not self.ai_enabled_for_channel.get(channel_id, False):
             return
 
-        # Nachricht ins Konversations-Log
+        # Nachricht ins KI-Konversations-Log
         user_text = normalize_id_string(message.content)
         self.conversations[channel_id].append({
             "role": "user",
@@ -366,7 +431,7 @@ class TicketCog(commands.Cog):
         })
         print(f"[LOG] Neue Nachricht im Channel {channel_id} von {message.author.name}: {user_text}")
 
-        # 1) Prüfe, ob Nutzer nach fertiger Entschuldigung fragt
+        # 1) Prüfe nach fertiger Entschuldigung
         apology_keywords = [
             "entschuldigung schreiben", "formulieren", "apology", "help me write",
             "schreibe mir eine entschuldigung", "schreibe mir ein statement"
@@ -379,7 +444,7 @@ class TicketCog(commands.Cog):
             print(f"[LOG] Nutzer {message.author.name} bat um Entschuldigungsvorlage. Abgelehnt.")
             return
 
-        # 2) Klassifiziere kooperativ/unkooperativ (per GPT)
+        # 2) Klassifiziere kooperativ/unkooperativ
         is_cooperative = await self.classify_cooperative(channel_id)
         if not is_cooperative:
             self.uncooperative_count[channel_id] += 1
@@ -399,6 +464,7 @@ class TicketCog(commands.Cog):
         # 3) Prüfe, ob ID bereits genannt wurde
         has_id, stored_id = self.channel_has_id[channel_id]
         if not has_id:
+            # Regex-Suche nach einer ID, z.B. "test123456789012345"
             possible_ids = re.findall(r"\b[a-zA-Z0-9]{16,}\b", user_text)
             if not possible_ids:
                 await message.channel.send(
@@ -478,7 +544,7 @@ class TicketCog(commands.Cog):
                 print(f"[LOG] Stellungnahme ausreichend => KI für Channel {channel_id} deaktiviert und an Support/Admin verwiesen.")
                 return
 
-            # Sonst -> KI fragt weiter nach
+            # Sonst -> KI fragt weiter
             await asyncio.sleep(2)
             try:
                 ai_reply = await self.generate_ai_response(channel_id)
@@ -488,9 +554,13 @@ class TicketCog(commands.Cog):
                 print("[AI-Fehler]", e)
                 await message.channel.send("Entschuldige, es ist ein Fehler bei der KI-Anfrage aufgetreten.")
 
+    # ------------------------------------------------------------------------
+    # KI-Hilfsmethoden
+    # ------------------------------------------------------------------------
+
     async def classify_cooperative(self, channel_id: int) -> bool:
         """
-        Nutzt ChatGPT, um den Gesprächsverlauf kurz zu bewerten:
+        Nutzt GPT (via openai) um den Gesprächsverlauf kurz zu bewerten:
         Gibt True zurück, wenn der Nutzer kooperativ wirkt.
         Gibt False zurück, wenn der Nutzer unkooperativ wirkt.
         """
@@ -516,7 +586,8 @@ class TicketCog(commands.Cog):
         loop = asyncio.get_running_loop()
 
         def sync_call():
-            response = self.openai_client.chat.completions.create(
+            # Ab openai>=1.0.0: chat_completions
+            response = openai.chat_completions.create(
                 model="gpt-3.5-turbo",
                 messages=messages_for_ai,
                 max_tokens=5,
@@ -572,12 +643,13 @@ class TicketCog(commands.Cog):
         loop = asyncio.get_running_loop()
 
         def sync_call():
-            return self.openai_client.chat.completions.create(
+            response = openai.chat_completions.create(
                 model=self.openai_model,
                 messages=prompt_messages,
                 max_tokens=150,
                 temperature=0.7
             )
+            return response
 
         try:
             response = await loop.run_in_executor(None, sync_call)
@@ -617,18 +689,19 @@ class TicketCog(commands.Cog):
         loop = asyncio.get_running_loop()
 
         def sync_call():
-            return self.openai_client.chat.completions.create(
+            response = openai.chat_completions.create(
                 model=self.openai_model,
                 messages=messages_for_openai,
                 max_tokens=self.openai_max_tokens,
                 temperature=self.openai_temp
             )
+            return response
 
         response = await loop.run_in_executor(None, sync_call)
         ai_text = response.choices[0].message.content.strip()
         print(f"[LOG] generate_ai_response => {ai_text[:80]}{'...' if len(ai_text)>80 else ''}")
 
-        # KI-Antwort in den Verlauf
+        # KI-Antwort in den Verlauf packen
         self.conversations[channel_id].append({
             "role": "assistant",
             "content": ai_text
@@ -636,6 +709,9 @@ class TicketCog(commands.Cog):
 
         return ai_text
 
+    # ------------------------------------------------------------------------
+    # Hilfsprüfungen
+    # ------------------------------------------------------------------------
     def is_sufficient_explanation(self, user_text: str, guild: discord.Guild) -> bool:
         """
         Prüft, ob der Nutzer 'ausreichend' erklärt hat.
@@ -648,10 +724,9 @@ class TicketCog(commands.Cog):
 
     def has_support_role(self, member: discord.Member) -> bool:
         """Gibt True zurück, wenn der Member Support- oder Admin-Rolle hat."""
-        support_id = config.SUPPORT_ROLE_ID  # int
-        admin_id = config.ADMIN_ROLE_ID      # int
-        return any(r.id == support_id for r in member.roles) \
-            or any(r.id == admin_id for r in member.roles)
+        support_id = config.SUPPORT_ROLE_ID
+        admin_id = config.ADMIN_ROLE_ID
+        return any(r.id == support_id for r in member.roles) or any(r.id == admin_id for r in member.roles)
 
     def is_ticket_channel(self, channel: discord.TextChannel) -> bool:
         """Prüft, ob der Channel in einer der Ticket-Kategorien ist."""
@@ -665,13 +740,17 @@ class TicketCog(commands.Cog):
         ]
 
     async def fetch_detail_data(self, pid: str):
-        """Liest http://api.hackletloose.eu/detail/<pid>, gibt bei 200 JSON, sonst None zurück."""
+        """
+        Liest z. B. http://api.hackletloose.eu/detail/<pid>
+        Gibt bei 200 den JSON zurück, sonst None.
+        """
         url = f"http://api.hackletloose.eu/detail/{pid}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
                     return await resp.json()
                 return None
+
 
 def setup(bot):
     bot.add_cog(TicketCog(bot))

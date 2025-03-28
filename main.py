@@ -1,7 +1,10 @@
+# main.py
+
 import discord
 from discord.ext import commands
 
 from utils import config
+from utils.database import Database
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -11,6 +14,7 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Unsere Cogs
 initial_cogs = [
     "cogs.ticket_cog",
     "cogs.transcript_cog"
@@ -20,26 +24,21 @@ initial_cogs = [
 async def on_ready():
     """
     Wird aufgerufen, sobald der Bot eingeloggt ist.
-    Wir setzen hier beim Start automatisch die Kategorie-Berechtigungen
-    für unsere Ticket-Kategorien.
+    1) Korrigiert automatisch die Kategorie-Permissions
+    2) Registriert Slash-Befehle (sync)
+    3) Stellt ggf. den Ticket-Button wieder her
     """
     print(f"[LOG] Eingeloggt als {bot.user} (ID: {bot.user.id})")
 
     guild = bot.get_guild(config.GUILD_ID)
     if guild is None:
-        print(f"[Warnung] Guild mit ID {config.GUILD_ID} nicht gefunden.")
+        print(f"[Warnung] Konnte Guild mit ID {config.GUILD_ID} nicht finden.")
         return
 
+    # Kategorien laden
     created_cat = guild.get_channel(config.CREATED_TICKETS_CATEGORY_ID)
     claimed_cat = guild.get_channel(config.CLAIMED_TICKETS_CATEGORY_ID)
     closed_cat = guild.get_channel(config.CLOSED_TICKETS_CATEGORY_ID)
-
-    if not created_cat:
-        print("[Warnung] CREATED_TICKETS_CATEGORY_ID nicht gefunden.")
-    if not claimed_cat:
-        print("[Warnung] CLAIMED_TICKETS_CATEGORY_ID nicht gefunden.")
-    if not closed_cat:
-        print("[Warnung] CLOSED_TICKETS_CATEGORY_ID nicht gefunden.")
 
     # Rollen
     everyone = guild.default_role
@@ -48,70 +47,96 @@ async def on_ready():
     viewer_role = guild.get_role(config.VIEWER_ROLE_ID)
     viewer_role2 = guild.get_role(config.VIEWER2_ROLE_ID)
 
-    # Overwrites (Created)
-    await fix_category_perms(
-        category=created_cat,
-        everyone_view=False, everyone_send=False,
-        support_view=True, support_send=True,
-        admin_view=True, admin_send=True,
-        viewer_view=True, viewer_send=False,
-        support_role=support_role,
-        admin_role=admin_role,
-        viewer_role=viewer_role,
-        viewer_role2=viewer_role2,
-        everyone=everyone
-    )
-
-    # Overwrites (Claimed)
-    await fix_category_perms(
-        category=claimed_cat,
-        everyone_view=False, everyone_send=False,
-        support_view=True, support_send=True,
-        admin_view=True, admin_send=True,
-        viewer_view=True, viewer_send=False,
-        support_role=support_role,
-        admin_role=admin_role,
-        viewer_role=viewer_role,
-        viewer_role2=viewer_role2,
-        everyone=everyone
-    )
-
-    # Overwrites (Closed)
-    await fix_category_perms(
-        category=closed_cat,
-        everyone_view=False, everyone_send=False,
-        support_view=True, support_send=False,
-        admin_view=True, admin_send=False,
-        viewer_view=True, viewer_send=False,
-        support_role=support_role,
-        admin_role=admin_role,
-        viewer_role=viewer_role,
-        viewer_role2=viewer_role2,
-        everyone=everyone
-    )
+    # 1) Kategorie-Permissions anpassen
+    #    (Du kannst diese drei Aufrufe weglassen, falls es bereits woanders geregelt wird.)
+    if created_cat:
+        await fix_category_perms(
+            category=created_cat,
+            everyone_view=False, everyone_send=False,
+            support_view=True, support_send=True,
+            admin_view=True, admin_send=True,
+            viewer_view=True, viewer_send=False,
+            support_role=support_role,
+            admin_role=admin_role,
+            viewer_role=viewer_role,
+            viewer_role2=viewer_role2,
+            everyone=everyone
+        )
+    if claimed_cat:
+        await fix_category_perms(
+            category=claimed_cat,
+            everyone_view=False, everyone_send=False,
+            support_view=True, support_send=True,
+            admin_view=True, admin_send=True,
+            viewer_view=True, viewer_send=False,
+            support_role=support_role,
+            admin_role=admin_role,
+            viewer_role=viewer_role,
+            viewer_role2=viewer_role2,
+            everyone=everyone
+        )
+    if closed_cat:
+        await fix_category_perms(
+            category=closed_cat,
+            everyone_view=False, everyone_send=False,
+            support_view=True, support_send=False,
+            admin_view=True, admin_send=False,
+            viewer_view=True, viewer_send=False,
+            support_role=support_role,
+            admin_role=admin_role,
+            viewer_role=viewer_role,
+            viewer_role2=viewer_role2,
+            everyone=everyone
+        )
 
     print("[LOG] Automatisches Setzen der Kategorie-Berechtigungen abgeschlossen.")
-    
-    # ---------------------------------------
-    # NEUES LOG: Slash-Befehle registrieren
-    # ---------------------------------------
-    try:
-        # In Pycord: Slash-Befehle werden per bot.sync_commands() synchronisiert
-        synced = await bot.sync_commands()
 
-        # Neuere Pycord-Version => synced kann None sein
+    # 2) Slash-Befehle registrieren (sync)
+    try:
+        synced = await bot.sync_commands()
         if synced is None:
             print("[LOG] Slash-Befehle wurden erfolgreich synchronisiert (sync_commands() => None).")
             print("[LOG] Registrierte Slash-Befehle:")
             for cmd in bot.application_commands:
                 print(f"   - /{cmd.name}")
         else:
-            # Bei älteren Versionen kann synced eine Liste sein
             print(f"[LOG] {len(synced)} Slash-Befehle wurden erfolgreich registriert:")
             for cmd in synced:
                 print(f"   - /{cmd.name}")
     except Exception as e:
         print(f"[ERROR] Fehler beim Syncen der Slash-Befehle: {e}")
+
+    # 3) Falls wir schon eine Ticket-Button-Nachricht in der DB haben, View erneut dranheften
+    db = Database()
+    channel_id = db.get_bot_setting("TICKET_BUTTON_CHANNEL_ID")
+    message_id = db.get_bot_setting("TICKET_BUTTON_MESSAGE_ID")
+
+    if channel_id and message_id:
+        try:
+            channel_id = int(channel_id)
+            message_id = int(message_id)
+            channel = guild.get_channel(channel_id)
+
+            if channel:
+                # Alte Nachricht per ID holen
+                old_msg = await channel.fetch_message(message_id)
+                # Cog + View-Klasse importieren
+                from cogs.ticket_cog import TicketCog, CreateTicketView
+                ticket_cog = bot.get_cog("TicketCog")
+
+                if ticket_cog and old_msg:
+                    # Neue View an alte Nachricht anheften
+                    new_view = CreateTicketView(ticket_cog)
+                    await old_msg.edit(view=new_view)
+                    print(f"[LOG] Ticket-Button (Message-ID={message_id}) wurde erfolgreich erneut aktiviert.")
+                else:
+                    print("[WARN] Konnte den TicketCog oder die alte Nachricht nicht finden.")
+            else:
+                print("[WARN] Konnte den Ticket-Button-Channel nicht finden.")
+        except Exception as e:
+            print(f"[WARN] Fehler beim Wiederherstellen der Ticket-Button-Message: {e}")
+    else:
+        print("[LOG] Keine gespeicherte Ticket-Button-Message gefunden. /setup_ticket_button ggf. ausführen.")
 
     print("------")
 
@@ -127,11 +152,8 @@ async def fix_category_perms(
 ):
     """
     Setzt Standard-Permissions für eine Kategorie.
-    Falls category=None, wird nichts unternommen.
+    (Aus deinem vorhandenen Code übernommen.)
     """
-    if not category:
-        return
-
     # Jeder (everyone) darf nix
     await category.set_permissions(everyone, view_channel=everyone_view, send_messages=everyone_send)
 
@@ -151,7 +173,9 @@ async def fix_category_perms(
     if viewer_role2:
         await category.set_permissions(viewer_role2, view_channel=viewer_view, send_messages=viewer_send)
 
+
 def main():
+    # Cogs laden
     for cog in initial_cogs:
         try:
             bot.load_extension(cog)
