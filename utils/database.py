@@ -1,15 +1,13 @@
-# utils/database.py
-
 import sqlite3
 
 class Database:
     def __init__(self):
         # Erstelle Tabellen (falls nicht vorhanden)
         self._create_tables()
+        self._ensure_admin_message_id_column()
 
     def _create_tables(self):
         with sqlite3.connect("tickets.sqlite") as conn:
-            # Tabelle tickets
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tickets (
                     id INTEGER PRIMARY KEY,
@@ -19,10 +17,10 @@ class Database:
                     status TEXT DEFAULT 'open',
                     claimed_by TEXT,
                     user_name TEXT
+                    -- admin_message_id kommt gleich per ALTER TABLE
                 );
             """)
 
-            # Tabelle transcripts
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS transcripts (
                     transcript_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,7 +30,6 @@ class Database:
                 );
             """)
 
-            # Neue Tabelle bot_settings - Key/Value
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS bot_settings (
                     key TEXT PRIMARY KEY,
@@ -41,6 +38,20 @@ class Database:
             """)
 
             conn.commit()
+
+    def _ensure_admin_message_id_column(self):
+        """
+        Versuche, per ALTER TABLE eine Spalte admin_message_id hinzuzufügen.
+        Falls es sie schon gibt, ignorieren wir den Fehler.
+        """
+        with sqlite3.connect("tickets.sqlite") as conn:
+            try:
+                conn.execute("ALTER TABLE tickets ADD COLUMN admin_message_id TEXT")
+                conn.commit()
+                print("[DB] Spalte admin_message_id erfolgreich hinzugefügt.")
+            except sqlite3.OperationalError:
+                # Wahrscheinlich existiert die Spalte schon
+                pass
 
     ########################################################################
     # Bot-Settings: key-value
@@ -84,6 +95,19 @@ class Database:
     def log_ticket_created(self, ticket_id: int, user_id: int, user_name: str, channel_id: int):
         self.insert_ticket(ticket_id, user_id, user_name, channel_id)
         print(f"[DB] Ticket erstellt - ID={ticket_id}, UserID={user_id}, Name='{user_name}', Channel={channel_id}")
+
+    def log_ticket_admin_message(self, ticket_id: int, admin_message_id: int):
+        """
+        Speichert die Nachricht, in der die Admin-Buttons sind,
+        damit wir sie reattachen können.
+        """
+        with sqlite3.connect("tickets.sqlite") as conn:
+            conn.execute(
+                "UPDATE tickets SET admin_message_id=? WHERE id=?",
+                (str(admin_message_id), ticket_id)
+            )
+            conn.commit()
+        print(f"[DB] Ticket #{ticket_id}: admin_message_id={admin_message_id} hinterlegt.")
 
     def log_ticket_claimed(self, ticket_id: int, supporter_id: int):
         with sqlite3.connect("tickets.sqlite") as conn:
@@ -130,7 +154,7 @@ class Database:
             )
             row = cur.fetchone()
             if row:
-                return row[0]  # transcript_content
+                return row[0]
         return ""
 
     def get_ticket_user(self, ticket_id: int):
@@ -141,3 +165,26 @@ class Database:
             if row:
                 return int(row[0])
         return None
+
+    def get_open_or_claimed_tickets(self):
+        """
+        Liefert alle Tickets, die nicht 'closed' und nicht 'deleted' sind.
+        Also Status = 'open' oder 'claimed'.
+        """
+        with sqlite3.connect("tickets.sqlite") as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, channel_id, admin_message_id, status
+                FROM tickets
+                WHERE status IN ('open', 'claimed')
+            """)
+            rows = cur.fetchall()
+            results = []
+            for row in rows:
+                results.append({
+                    "ticket_id": row[0],
+                    "channel_id": row[1],
+                    "admin_message_id": row[2],
+                    "status": row[3]
+                })
+            return results

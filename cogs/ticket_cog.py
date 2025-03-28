@@ -1,13 +1,12 @@
-# cogs/ticket_cog.py
-
 import discord
 from discord.ext import commands
 import re
 import aiohttp
 import asyncio
-import openai
 import unicodedata
 from collections import defaultdict
+
+from openai import OpenAI
 
 from utils import config, database
 
@@ -28,9 +27,6 @@ class CreateTicketView(discord.ui.View):
     @discord.ui.button(label="Ticket erstellen", style=discord.ButtonStyle.danger)
     async def create_ticket_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
         await self.cog.create_ticket(interaction)
-        # Optional: Button nach Klick deaktivieren, um Spam zu vermeiden
-        # button.disabled = True
-        # await interaction.edit_original_response(view=self)
 
 
 class TicketAdminView(discord.ui.View):
@@ -101,10 +97,8 @@ class TicketCog(commands.Cog):
         # Zähler für uneinsichtiges Verhalten
         self.uncooperative_count = defaultdict(int)
 
-        # OpenAI Setup
-        # Ab openai>=1.0.0 sind die alten ChatCompletion.create-Aufrufe nicht mehr gültig
-        # => Daher nutzen wir openai.chat_completions.create(...)
-        openai.api_key = config.OPENAI_API_KEY
+        # OpenAI Setup:
+        self.openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
         self.openai_model = config.OPENAI_MODEL or "gpt-3.5-turbo"
         self.openai_temp = 0.7
         self.openai_max_tokens = 1000
@@ -120,12 +114,11 @@ class TicketCog(commands.Cog):
         name="setup_ticket_button",
         description="Erstellt im aktuellen Kanal eine Nachricht mit einem Ticket-Button (nur Admin)."
     )
-    @commands.has_role(config.ADMIN_ROLE_ID)  # Nur Admin
+    @commands.has_role(config.ADMIN_ROLE_ID)
     async def setup_ticket_button(self, ctx: discord.ApplicationContext):
         """
         Legt eine neue Nachricht mit dem Ticket-Erstell-Button an
-        und speichert channel_id + message_id in der DB,
-        damit wir sie beim Bot-Neustart wiederverwenden können.
+        und speichert channel_id + message_id in der DB.
         """
         print("[LOG] Slash-Befehl '/setup_ticket_button' wurde aufgerufen.")
         embed = discord.Embed(
@@ -138,25 +131,19 @@ class TicketCog(commands.Cog):
         )
 
         view = CreateTicketView(self)
-        # Nachricht mit Button im Kanal platzieren
         msg = await ctx.channel.send(embed=embed, view=view)
 
-        # Channel/Message-ID in DB speichern,
-        # damit wir beim nächsten Neustart wieder denselben Button reaktivieren können
+        # Channel/Message-ID in DB speichern
         self.db.save_bot_setting("TICKET_BUTTON_CHANNEL_ID", str(ctx.channel.id))
         self.db.save_bot_setting("TICKET_BUTTON_MESSAGE_ID", str(msg.id))
 
-        # Slash-Befehl selbst ephemeral bestätigen
         await ctx.respond("Ticket-Button wurde platziert und in der DB registriert.", ephemeral=True)
         print(f"[LOG] Ticket-Button im Kanal {ctx.channel.id}, Nachricht {msg.id} gespeichert.")
 
     # ------------------------------------------------------------------------
-    # create_ticket: Erzeugt ein Ticket, KI aktivieren, ...
+    # create_ticket: Erzeugt ein Ticket
     # ------------------------------------------------------------------------
     async def create_ticket(self, interaction: discord.Interaction):
-        """
-        Erzeugt ein Ticket und aktiviert die KI im Kanal.
-        """
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.NotFound:
@@ -218,10 +205,17 @@ class TicketCog(commands.Cog):
                 color=discord.Color.blue()
             )
 
-            # Admin/Support-Buttons (beanspruchen, schließen, löschen)
+            # Admin/Support-Buttons
             view = TicketAdminView(self)
 
-            await ticket_channel.send(content=user.mention, embed=embed, view=view)
+            # WICHTIG: Wir speichern die Nachricht, an der die Admin-Buttons hängen => admin_message_id
+            admin_message = await ticket_channel.send(content=user.mention, embed=embed, view=view)
+
+            # Hier speicherst du die admin_message_id
+            #   - erst Ticket anlegen (oben) -> log_ticket_created
+            #   - dann admin_message_id eintragen:
+            self.db.log_ticket_admin_message(ticket_id, admin_message.id)
+
             print(f"[LOG] Ticket #{ticket_id} erstellt von {user.name} (ID: {user.id}).")
 
             # Erste KI-Nachricht
@@ -387,13 +381,12 @@ class TicketCog(commands.Cog):
         self.db.log_ticket_deleted(ticket_id)
         await channel.send("Ticket-Kanal wird gelöscht...")
 
-        # KI aus
         self.ai_enabled_for_channel[channel.id] = False
         await channel.delete()
         print(f"[LOG] Ticket #{ticket_id} wurde von {interaction.user.name} gelöscht.")
 
     ############################################################################
-    # on_message: KI-Logik (kooperativ/unkooperativ) + Banngrund-KI-Abfragen
+    # on_message: KI-Logik
     ############################################################################
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -404,7 +397,7 @@ class TicketCog(commands.Cog):
 
         channel_id = message.channel.id
 
-        # Wenn ein Supporter/Admin schreibt -> KI aus
+        # Support/Admin -> KI aus
         if self.has_support_role(message.author):
             if self.ai_enabled_for_channel.get(channel_id, False):
                 self.ai_enabled_for_channel[channel_id] = False
@@ -412,10 +405,9 @@ class TicketCog(commands.Cog):
                     "Ein Supporter oder Administrator ist jetzt anwesend. "
                     "Ich beende meine Antworten."
                 )
-                print(f"[LOG] KI im Channel {channel_id} deaktiviert, weil Support/Admin geschrieben hat.")
+                print(f"[LOG] KI im Channel {channel_id} deaktiviert (Support/Admin).")
             return
 
-        # Nur in Ticket-Kanälen reagieren
         if not self.is_ticket_channel(message.channel):
             return
 
@@ -423,7 +415,6 @@ class TicketCog(commands.Cog):
         if not self.ai_enabled_for_channel.get(channel_id, False):
             return
 
-        # Nachricht ins KI-Konversations-Log
         user_text = normalize_id_string(message.content)
         self.conversations[channel_id].append({
             "role": "user",
@@ -444,11 +435,10 @@ class TicketCog(commands.Cog):
             print(f"[LOG] Nutzer {message.author.name} bat um Entschuldigungsvorlage. Abgelehnt.")
             return
 
-        # 2) Klassifiziere kooperativ/unkooperativ
+        # 2) Kooperativ/Unkooperativ?
         is_cooperative = await self.classify_cooperative(channel_id)
         if not is_cooperative:
             self.uncooperative_count[channel_id] += 1
-            print(f"[LOG] => unkooperativ => Counter = {self.uncooperative_count[channel_id]} (Channel: {channel_id})")
             if self.uncooperative_count[channel_id] >= 3:
                 await message.channel.send(
                     "Deine Antworten zeigen leider mehrfach, dass du keine Einsicht zeigst. "
@@ -461,16 +451,14 @@ class TicketCog(commands.Cog):
         else:
             print(f"[LOG] => kooperativ (Channel: {channel_id})")
 
-        # 3) Prüfe, ob ID bereits genannt wurde
+        # 3) ID bereits genannt?
         has_id, stored_id = self.channel_has_id[channel_id]
         if not has_id:
-            # Regex-Suche nach einer ID, z.B. "test123456789012345"
             possible_ids = re.findall(r"\b[a-zA-Z0-9]{16,}\b", user_text)
             if not possible_ids:
                 await message.channel.send(
                     "Bitte teile mir zuerst deine **ID** mit, damit ich deinen Banngrund prüfen kann."
                 )
-                print(f"[LOG] Noch keine ID im Channel {channel_id}, Nutzer wurde erneut aufgefordert.")
                 return
             else:
                 found_id = possible_ids[0]
@@ -481,7 +469,7 @@ class TicketCog(commands.Cog):
 
                     expanded_reason = await self.elaborate_ban_reason(player_name, reason)
 
-                    # Offensive Namenscheck
+                    # Offensive Name?
                     offensive_keywords = ["nazi", "hitler", "sex", "ss", "reich", "racist", "mengele", "kriegsverbrecher"]
                     note_text = ""
                     if any(kw in player_name.lower() for kw in offensive_keywords):
@@ -490,6 +478,7 @@ class TicketCog(commands.Cog):
                             "sexistisch oder nationalsozialistisch."
                         )
 
+                    # Falls der Name + Banngrund Rassismus etc. => extra Hinweis
                     reason_lower = reason.lower()
                     connection_keywords = ["name", "ns", "rassist", "sexist", "hitler", "reich", "antisemit", "mengele", "kriegsverbrecher"]
                     connected_text = ""
@@ -515,13 +504,11 @@ class TicketCog(commands.Cog):
                         "content": ban_reply
                     })
                     await message.channel.send(ban_reply)
-                    print(f"[LOG] ID {found_id} im Channel {channel_id} erkannt, Banngrund = {reason}.")
                     return
                 else:
                     await message.channel.send(
                         "Diese ID ist mir nicht bekannt. Bitte überprüfe sie oder nenne mir eine andere ID."
                     )
-                    print(f"[LOG] Unbekannte ID {found_id} im Channel {channel_id}.")
                     return
         else:
             # 4) Ausreichende Stellungnahme?
@@ -541,7 +528,6 @@ class TicketCog(commands.Cog):
                     f"Ich gebe das nun an {mention_text} weiter, der/die sich darum kümmern wird."
                 )
                 self.ai_enabled_for_channel[channel_id] = False
-                print(f"[LOG] Stellungnahme ausreichend => KI für Channel {channel_id} deaktiviert und an Support/Admin verwiesen.")
                 return
 
             # Sonst -> KI fragt weiter
@@ -557,19 +543,8 @@ class TicketCog(commands.Cog):
     # ------------------------------------------------------------------------
     # KI-Hilfsmethoden
     # ------------------------------------------------------------------------
-
     async def classify_cooperative(self, channel_id: int) -> bool:
-        """
-        Nutzt GPT (via openai) um den Gesprächsverlauf kurz zu bewerten:
-        Gibt True zurück, wenn der Nutzer kooperativ wirkt.
-        Gibt False zurück, wenn der Nutzer unkooperativ wirkt.
-        """
         recent_messages = self.conversations[channel_id][-6:]
-        print("[LOG] [classify_cooperative] Letzte Nachrichten (Channel:", channel_id, ")")
-        for i, msg in enumerate(recent_messages, start=1):
-            snippet = msg["content"][:80].replace("\n", " ")
-            print(f"   #{i} ({msg['role']}): {snippet}{'...' if len(msg['content'])>80 else ''}")
-
         system_prompt = {
             "role": "system",
             "content": (
@@ -586,20 +561,17 @@ class TicketCog(commands.Cog):
         loop = asyncio.get_running_loop()
 
         def sync_call():
-            # Ab openai>=1.0.0: chat_completions
-            response = openai.chat_completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=messages_for_ai,
                 max_tokens=5,
-                temperature=0.0,
-                n=1,
+                temperature=0.0
             )
             return response
 
         try:
             response = await loop.run_in_executor(None, sync_call)
             classification = response.choices[0].message.content.strip().lower()
-            print(f"[LOG] KI-Klassifikation => '{classification}' (Channel {channel_id})")
 
             if "uncooperative" in classification:
                 return False
@@ -609,17 +581,11 @@ class TicketCog(commands.Cog):
                 return False
             else:
                 return True
-
         except Exception as e:
             print("[Fehler in classify_cooperative]", e)
-            # Fallback: kooperativ
             return True
 
     async def elaborate_ban_reason(self, player_name: str, reason: str) -> str:
-        """
-        Fragt die KI nach einer kurzen, ausführlichen Erklärung des Banngrundes.
-        Max. 2 Sätze.
-        """
         prompt_messages = [
             {
                 "role": "system",
@@ -643,7 +609,7 @@ class TicketCog(commands.Cog):
         loop = asyncio.get_running_loop()
 
         def sync_call():
-            response = openai.chat_completions.create(
+            response = self.openai_client.chat.completions.create(
                 model=self.openai_model,
                 messages=prompt_messages,
                 max_tokens=150,
@@ -655,7 +621,6 @@ class TicketCog(commands.Cog):
             response = await loop.run_in_executor(None, sync_call)
             elaboration = response.choices[0].message.content.strip()
             elaboration = safe_truncate(elaboration, 300)
-            print(f"[LOG] elaborate_ban_reason => {elaboration[:80]}{'...' if len(elaboration)>80 else ''}")
             return elaboration
         except Exception as e:
             print("[Fehler bei elaborate_ban_reason]", e)
@@ -665,12 +630,6 @@ class TicketCog(commands.Cog):
             )
 
     async def generate_ai_response(self, channel_id: int) -> str:
-        """
-        System-Prompt:
-         - Du bist Sekretärin Siegrid
-         - Frage nur nach Details zum Banngrund
-         - Verweise nicht auf fertige Entschuldigungen
-        """
         conversation = self.conversations[channel_id]
         system_msg = {
             "role": "system",
@@ -689,7 +648,7 @@ class TicketCog(commands.Cog):
         loop = asyncio.get_running_loop()
 
         def sync_call():
-            response = openai.chat_completions.create(
+            response = self.openai_client.chat.completions.create(
                 model=self.openai_model,
                 messages=messages_for_openai,
                 max_tokens=self.openai_max_tokens,
@@ -699,37 +658,26 @@ class TicketCog(commands.Cog):
 
         response = await loop.run_in_executor(None, sync_call)
         ai_text = response.choices[0].message.content.strip()
-        print(f"[LOG] generate_ai_response => {ai_text[:80]}{'...' if len(ai_text)>80 else ''}")
 
-        # KI-Antwort in den Verlauf packen
         self.conversations[channel_id].append({
             "role": "assistant",
             "content": ai_text
         })
-
         return ai_text
 
     # ------------------------------------------------------------------------
     # Hilfsprüfungen
     # ------------------------------------------------------------------------
     def is_sufficient_explanation(self, user_text: str, guild: discord.Guild) -> bool:
-        """
-        Prüft, ob der Nutzer 'ausreichend' erklärt hat.
-        (Stark vereinfacht: >=10 Wörter und 'weil' oder 'ich habe')
-        """
         words = user_text.strip().split()
-        if len(words) >= 10 and ("weil" in user_text.lower() or "ich habe" in user_text.lower()):
-            return True
-        return False
+        return (len(words) >= 10) and ("weil" in user_text.lower() or "ich habe" in user_text.lower())
 
     def has_support_role(self, member: discord.Member) -> bool:
-        """Gibt True zurück, wenn der Member Support- oder Admin-Rolle hat."""
         support_id = config.SUPPORT_ROLE_ID
         admin_id = config.ADMIN_ROLE_ID
         return any(r.id == support_id for r in member.roles) or any(r.id == admin_id for r in member.roles)
 
     def is_ticket_channel(self, channel: discord.TextChannel) -> bool:
-        """Prüft, ob der Channel in einer der Ticket-Kategorien ist."""
         if not channel.category:
             return False
         cat_id = channel.category.id
@@ -740,10 +688,6 @@ class TicketCog(commands.Cog):
         ]
 
     async def fetch_detail_data(self, pid: str):
-        """
-        Liest z. B. http://api.hackletloose.eu/detail/<pid>
-        Gibt bei 200 den JSON zurück, sonst None.
-        """
         url = f"http://api.hackletloose.eu/detail/{pid}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
@@ -752,5 +696,5 @@ class TicketCog(commands.Cog):
                 return None
 
 
-def setup(bot):
+def setup(bot: commands.Bot):
     bot.add_cog(TicketCog(bot))

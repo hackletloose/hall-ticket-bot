@@ -1,5 +1,3 @@
-# main.py
-
 import discord
 from discord.ext import commands
 
@@ -27,6 +25,7 @@ async def on_ready():
     1) Korrigiert automatisch die Kategorie-Permissions
     2) Registriert Slash-Befehle (sync)
     3) Stellt ggf. den Ticket-Button wieder her
+    4) Stellt ggf. die Admin-Buttons in offenen Tickets wieder her
     """
     print(f"[LOG] Eingeloggt als {bot.user} (ID: {bot.user.id})")
 
@@ -48,7 +47,6 @@ async def on_ready():
     viewer_role2 = guild.get_role(config.VIEWER2_ROLE_ID)
 
     # 1) Kategorie-Permissions anpassen
-    #    (Du kannst diese drei Aufrufe weglassen, falls es bereits woanders geregelt wird.)
     if created_cat:
         await fix_category_perms(
             category=created_cat,
@@ -138,7 +136,45 @@ async def on_ready():
     else:
         print("[LOG] Keine gespeicherte Ticket-Button-Message gefunden. /setup_ticket_button ggf. ausführen.")
 
+    # 4) Admin-Buttons bei offenen Tickets wiederherstellen
+    try:
+        open_tickets = db.get_open_or_claimed_tickets()
+        if not open_tickets:
+            print("[LOG] Keine offenen/claimed Tickets zu aktualisieren.")
+        else:
+            from cogs.ticket_cog import TicketCog, TicketAdminView
+            ticket_cog = bot.get_cog("TicketCog")
+
+            if not ticket_cog:
+                print("[WARN] Konnte TicketCog nicht finden, Admin-Buttons können nicht wiederhergestellt werden.")
+            else:
+                for t in open_tickets:
+                    chan_id = t["channel_id"]
+                    admin_msg_id = t["admin_message_id"]
+                    tid = t["ticket_id"]
+
+                    if not admin_msg_id:
+                        # Falls wir für dieses Ticket noch keine admin_message_id gespeichert haben, überspringen wir
+                        continue
+
+                    ticket_channel = guild.get_channel(int(chan_id))
+                    if not ticket_channel:
+                        print(f"[WARN] Ticket-Channel {chan_id} nicht gefunden (Ticket #{tid}).")
+                        continue
+
+                    try:
+                        old_admin_msg = await ticket_channel.fetch_message(int(admin_msg_id))
+                        if old_admin_msg:
+                            admin_view = TicketAdminView(ticket_cog)
+                            await old_admin_msg.edit(view=admin_view)
+                            print(f"[LOG] Admin-View für Ticket #{tid} wiederhergestellt (Nachricht {admin_msg_id}).")
+                    except Exception as e:
+                        print(f"[WARN] Konnte Admin-Buttons in Ticket #{tid} nicht wiederherstellen: {e}")
+    except Exception as e:
+        print(f"[WARN] Fehler beim Wiederherstellen der Admin-Buttons: {e}")
+
     print("------")
+
 
 async def fix_category_perms(
     category: discord.CategoryChannel,
@@ -152,7 +188,6 @@ async def fix_category_perms(
 ):
     """
     Setzt Standard-Permissions für eine Kategorie.
-    (Aus deinem vorhandenen Code übernommen.)
     """
     # Jeder (everyone) darf nix
     await category.set_permissions(everyone, view_channel=everyone_view, send_messages=everyone_send)
@@ -185,6 +220,7 @@ def main():
 
     print("[LOG] Starte Bot...")
     bot.run(config.BOT_TOKEN)
+
 
 if __name__ == "__main__":
     main()
