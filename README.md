@@ -1,6 +1,6 @@
 Hier ist die aktualisierte `README.md`, in der zusätzlich **pytesseract** und **Pillow** erwähnt werden und wir auf die erforderliche Installation von Tesseract-OCR (inkl. deutschem Sprachpaket) hinweisen. Ansonsten bleibt der Inhalt weitgehend unverändert:
 
-```markdown
+
 # Ticket-Bot & Web-Panel (Discord + Flask)
 
 Dies ist ein Discord-Ticket-Bot mit integrierter KI-Unterstützung (OpenAI / GPT-4o-mini). Der Bot ermöglicht Nutzer\*innen, über einen Button ein Ticket zu eröffnen, woraufhin eine „Sekretärin Sigrid“ (KI) direkt im Channel erste Fragen stellt und entscheidet, ob der/die Nutzer\*in kooperativ ist. Anschließend kann das Support-/Admin-Team das Ticket übernehmen, bearbeiten, schließen oder löschen.
@@ -385,4 +385,3 @@ Anschließend kannst du Let's Encrypt oder ein anderes SSL-Zertifikat aktivieren
 - Dieses Projekt nutzt Abhängigkeiten mit eigenen Lizenzen (Discord, GPT-4o-mini/OpenAI, Flask etc.). Prüfe deren Bestimmungen.  
 - Achte auf die **Nutzungsrichtlinien** von Discord und deinem GPT-4o-mini-/OpenAI-Anbieter (z. B. Abrechnungsmodelle, verbotene Inhalte etc.).  
 - Du kannst den Code frei anpassen und erweitern.
-```
