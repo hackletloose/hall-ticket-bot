@@ -1,6 +1,9 @@
+Hier ist die aktualisierte `README.md`, in der zusätzlich **pytesseract** und **Pillow** erwähnt werden und wir auf die erforderliche Installation von Tesseract-OCR (inkl. deutschem Sprachpaket) hinweisen. Ansonsten bleibt der Inhalt weitgehend unverändert:
+
+```markdown
 # Ticket-Bot & Web-Panel (Discord + Flask)
 
-Dies ist ein Discord-Ticket-Bot mit integrierter KI-Unterstützung (OpenAI **GPT-4o-mini**). Der Bot ermöglicht Nutzer\*innen, über einen Button ein Ticket zu eröffnen, woraufhin eine „Sekretärin Sigrid“ (KI) direkt im Channel erste Fragen stellt und entscheidet, ob der/die Nutzer\*in kooperativ ist. Anschließend kann das Support-/Admin-Team das Ticket übernehmen, bearbeiten, schließen oder löschen.  
+Dies ist ein Discord-Ticket-Bot mit integrierter KI-Unterstützung (OpenAI / GPT-4o-mini). Der Bot ermöglicht Nutzer\*innen, über einen Button ein Ticket zu eröffnen, woraufhin eine „Sekretärin Sigrid“ (KI) direkt im Channel erste Fragen stellt und entscheidet, ob der/die Nutzer\*in kooperativ ist. Anschließend kann das Support-/Admin-Team das Ticket übernehmen, bearbeiten, schließen oder löschen.
 
 Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Discord-OAuth2-Login), die Übersichten und Transkripte der Tickets anzeigt.
 
@@ -19,6 +22,7 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 4. [Projektstruktur](#projektstruktur)  
 5. [Installation & Konfiguration](#installation--konfiguration)  
    1. [GPT-4o-mini-API-Key beschaffen](#gpt-4o-mini-api-key-beschaffen)  
+   2. [Tesseract-OCR und deutsches Sprachpaket (für OCR)](#tesseract-ocr-und-deutsches-sprachpaket-für-ocr)  
 6. [Start des Discord-Bots (lokal)](#start-des-discord-bots-lokal)  
 7. [Start des Flask-Webservers (lokal)](#start-des-flask-webservers-lokal)  
 8. [Produktivbetrieb](#produktivbetrieb)  
@@ -34,7 +38,7 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 ## Funktionsübersicht
 
 - **Ticket-Erstellung** via Button in Discord-Kanälen.  
-- **KI-Unterstützung** (GPT-4o-mini): Stellt anfangs Fragen (z. B. nach einer Bann-ID) und prüft Kooperationsbereitschaft.  
+- **KI-Unterstützung** (GPT-4o-mini oder kompatibel): Stellt anfangs Fragen (z. B. nach einer Bann-ID) und prüft Kooperationsbereitschaft.  
 - **Manuelles Claiming**: Supporter/Admins können Tickets beanspruchen, schreiben und den User direkt betreuen.  
 - **Abschluss**: Ticket schließen (Archiv in „Closed“-Kategorie, Transkript wird gespeichert) oder Ticket löschen (Kanal weg, Transkript bleibt in der Datenbank).  
 - **Web-Panel** (Flask) mit Discord-OAuth2-Anmeldung, um Ticketlisten und Transkripte einzusehen.
@@ -45,10 +49,12 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 
 - **Python 3.9** oder höher (empfohlen).  
 - **Discord-Bot** (Client-ID, Bot-Token) – Anlegen und konfigurieren siehe unten.  
-- **GPT-4o-mini-API-Key** (oder ein kompatibles GPT-4o-mini-Zugangstoken).  
+- **GPT-4o-mini-API-Key** (oder ein kompatibles OpenAI-/GPT-Zugangstoken).  
 - **SQLite** (in Python enthalten).  
-- Python-Bibliotheken wie `discord.py`, `openai`, `flask`, `requests`, `python-dotenv`, `aiohttp` – in bestimmten (aktuellen) Versionen.  
-- (Optional) `gunicorn` für einen produktiven Betrieb der Flask-App.
+- Für OCR-Funktionen:  
+  - `pytesseract` (Python-Bindings),  
+  - **systemweit installiertes Tesseract** mit deutschem Sprachpaket („tesseract-ocr-deu“).  
+- Python-Bibliotheken wie `py-cord`, `openai`, `flask`, `requests`, `python-dotenv`, `aiohttp`, `gunicorn`, `pytesseract`, `Pillow`.  
 
 ---
 
@@ -73,25 +79,23 @@ Zusätzlich enthält das Projekt eine Flask-Webanwendung (zugänglich über Disc
 ### Privileged Gateway Intents
 
 1. In der Bot-Seite (im Developer Portal) scrolle zu **Privileged Gateway Intents**.  
-2. Aktiviere ggf. **Message Content Intent**, wenn du benötigst, dass dein Bot Nachrichteninhalte lesen kann (hier im Code ist `message_content = True` gesetzt, also wird das benötigt).  
-3. Aktiviere ggf. auch **Presence Intent** oder **Server Members Intent** falls du das brauchst (hier ggf. nur `members` relevant).  
+2. Aktiviere ggf. **Message Content Intent**, wenn du möchtest, dass dein Bot Nachrichteninhalte lesen kann (hier im Code ist `message_content = True` gesetzt).  
+3. Aktiviere ggf. weitere Intents (z. B. Presence, Server Members) falls benötigt.  
 4. Klicke auf **Save Changes**.
 
 ### Bot einladen (Invite-Link)
 
 1. Gehe links auf **OAuth2 > URL Generator**.  
 2. Wähle unter **Scopes**: `bot` & `applications.commands` (für Slash-Befehle).  
-3. Unter **Bot Permissions** wähle die nötigen Rechte (z. B. `Send Messages`, `Manage Channels`, `Manage Roles` – je nachdem, welche Aktionen dein Bot ausführen muss, insb. um Tickets zu erstellen oder Rechte zu setzen).  
+3. Unter **Bot Permissions** wähle die nötigen Rechte (z. B. `Send Messages`, `Manage Channels`, `Manage Roles` – je nachdem, welche Aktionen dein Bot ausführen muss).  
 4. Der generierte Link (unten) kann jetzt kopiert und im Browser aufgerufen werden.  
-5. Wähle den Server, auf dem der Bot hinzugefügt werden soll, und bestätige.  
-
-Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte hat, die er braucht (z. B. um Channels zu erstellen).
+5. Wähle den Server, auf dem der Bot hinzugefügt werden soll, und bestätige.
 
 ### Slash Commands
 
-- Standardmäßig registriert Discord Slash-Befehle automatisch, wenn du sie in deinem Code (z. B. in `ticket_cog.py` oder `transcript_cog.py`) definiert hast.  
-- Stelle sicher, dass in den Bot-Einstellungen unter **General Information** das Feld **Public Bot** (ggf. an) und die Intents korrekt gesetzt sind, damit Slash Commands ordnungsgemäß ankommen.  
-- Manchmal kann es mehrere Minuten dauern, bis neue Slash Commands im Server verfügbar sind.
+- Standardmäßig registriert Discord Slash-Befehle automatisch, wenn du sie in deinem Code (z. B. in `ticket_cog.py`) definiert hast.  
+- Stelle sicher, dass du die erforderlichen Intents aktiviert hast.  
+- Die Synchronisierung der Slash-Befehle kann teils mehrere Minuten dauern.
 
 ---
 
@@ -132,20 +136,21 @@ Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte h
    ```
 
 3. **Abhängigkeiten installieren**  
-   Wenn deine `requirements.txt` bereits existiert, führe aus:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   Eine Beispiel-**`requirements.txt`** mit aktuellen Versionsangaben könnte so aussehen (Stand 2025+ fiktiv):
-
+   Die wichtigsten Python-Pakete sind in `requirements.txt` aufgeführt. Ein Beispiel:
    ```text
-   discord.py
+   py-cord
    openai
    flask
    requests
    python-dotenv
    aiohttp
    gunicorn
+   pytesseract
+   Pillow
+   ```
+   Installiere sie mit:
+   ```bash
+   pip install -r requirements.txt
    ```
 
 4. **Konfiguration in `.env`**  
@@ -167,7 +172,7 @@ Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte h
    MAX_TICKETS_PER_SUPPORTER=3
    TICKET_CLEANUP_DAYS=7
 
-   # Hier den GPT-4o-mini-Key (bzw. OpenAI-kompatiblen Key) eintragen:
+   # GPT-4o-mini- oder kompatibler API Key:
    OPENAI_API_KEY=sk-...
    OPENAI_MODEL=gpt-4o-mini
 
@@ -182,14 +187,37 @@ Anschließend ist der Bot auf deinem Server. Stelle sicher, dass er die Rechte h
 
 ### GPT-4o-mini-API-Key beschaffen
 
-Je nachdem, wie oder wo du GPT-4o-mini verwendest (z. B. lokal gehostet, per Proxy oder über einen Drittanbieter), benötigst du einen gültigen **API-Key** oder ein Zugangstoken. 
+Je nachdem, wie oder wo du GPT-4o-mini verwendest (z. B. lokal gehostet, per Proxy oder über einen Drittanbieter), benötigst du einen gültigen **API-Key** oder ein Zugangstoken.
 
 1. **Account / Projekt erstellen** beim Anbieter, der GPT-4o-mini bereitstellt, oder deine eigene Instanz konfigurieren.  
 2. **API-Schlüssel** generieren oder abrufen (z. B. „Secret Key“).  
 3. Diesen Schlüssel in der `.env` unter `OPENAI_API_KEY` eintragen (oder einer anderen Variable, falls du den Code entsprechend anpasst).  
-4. Überprüfe außerdem, ob du in `OPENAI_MODEL` statt `gpt-3.5-turbo` den Modellnamen `gpt-4o-mini` nutzt (oder wie dein Modell genau heißt).
+4. In `OPENAI_MODEL` könntest du „gpt-4o-mini“ eintragen, wenn dein Anbieter diesen Modellnamen unterstützt.
 
-Beachte die jeweiligen **Nutzungsbedingungen** und möglichen **Kosten** (z. B. pro Anfrage). 
+Beachte die jeweiligen **Nutzungsbedingungen** und möglichen **Kosten** (z. B. pro Anfrage).
+
+---
+
+### Tesseract-OCR und deutsches Sprachpaket (für OCR)
+
+Falls du in der `ticket_cog.py` die OCR-Funktion (z. B. `pytesseract.image_to_string(img, lang="deu")`) verwendest, musst du folgendes sicherstellen:
+
+- **Systemweit installiertes Tesseract-OCR** (nicht nur das Python-Paket `pytesseract`).  
+- Das **deutsche Sprachpaket** („deu“).  
+
+Beispiele:
+
+**Ubuntu/Debian**:
+```bash
+sudo apt-get update
+sudo apt-get install tesseract-ocr tesseract-ocr-deu
+```
+
+**Windows**:  
+- Lade das offizielle Tesseract-Windows-Installationsprogramm (z. B. [UB Mannheim Build](https://github.com/UB-Mannheim/tesseract/wiki)) herunter.  
+- Während der Installation kannst du zusätzliche Sprachpakete (wie Deutsch) auswählen oder später manuell in den `tessdata/`-Ordner legen (z. B. `deu.traineddata`).  
+
+Erst dann ist `pytesseract` (inkl. deutschem OCR) vollständig nutzbar.
 
 ---
 
@@ -201,14 +229,14 @@ Beachte die jeweiligen **Nutzungsbedingungen** und möglichen **Kosten** (z. B. 
    ```bash
    python main.py
    ```
-4. Auf der Konsole sollten Meldungen wie  
+4. Auf der Konsole sollten Meldungen erscheinen wie  
    ```
    [LOG] Erfolgreich cogs.ticket_cog geladen.
    [LOG] Erfolgreich cogs.transcript_cog geladen.
    [LOG] Starte Bot...
    [LOG] Eingeloggt als DeinBotName (ID: 123456789)
    ```
-   erscheinen. Der Bot ist nun auf deinem Server online (sofern Token & IDs stimmen).
+   Dann ist der Bot auf deinem Server online (sofern Token & IDs korrekt sind).
 
 ---
 
@@ -219,7 +247,7 @@ Beachte die jeweiligen **Nutzungsbedingungen** und möglichen **Kosten** (z. B. 
    ```bash
    python webapp/app.py
    ```
-3. Sie läuft in der Voreinstellung auf `http://127.0.0.1:60123`.  
+3. Standardmäßig läuft sie auf `http://127.0.0.1:60123`.  
 4. Öffne die URL im Browser. Du wirst über Discord-OAuth2 geleitet (sofern `DISCORD_REDIRECT_URI` korrekt eingetragen ist).
 
 ---
@@ -298,7 +326,7 @@ sudo systemctl start ticketweb_gunicorn
 sudo systemctl status ticketweb_gunicorn
 ```
 
-### Reverse Proxy (z. B. NGINX)
+### Reverse Proxy (z. B. NGINX)
 
 In der Regel leitest du in der produktiven Umgebung den Traffic per HTTPS von NGINX/Apache zu Gunicorn weiter. Ein Beispiel (NGINX, HTTP → Proxy → Gunicorn auf Port 60123):
 
@@ -355,10 +383,6 @@ Anschließend kannst du Let's Encrypt oder ein anderes SSL-Zertifikat aktivieren
 ## Lizenz / Hinweise
 
 - Dieses Projekt nutzt Abhängigkeiten mit eigenen Lizenzen (Discord, GPT-4o-mini/OpenAI, Flask etc.). Prüfe deren Bestimmungen.  
-- Achte auf die **Nutzungsrichtlinien** von Discord und deinem GPT-4o-mini-Anbieter (z. B. Abrechnungsmodelle, verbotene Inhalte etc.).  
+- Achte auf die **Nutzungsrichtlinien** von Discord und deinem GPT-4o-mini-/OpenAI-Anbieter (z. B. Abrechnungsmodelle, verbotene Inhalte etc.).  
 - Du kannst den Code frei anpassen und erweitern.
-
----
-
-**Viel Erfolg mit deinem Ticket-Bot!**  
-Bei Fragen oder Problemen kannst du etwa Issues in deinem Versionskontrollsystem anlegen oder das Support-Team kontaktieren.
+```
