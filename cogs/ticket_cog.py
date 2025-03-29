@@ -1,3 +1,5 @@
+# cogs/ticket_cog.py
+
 import discord
 from discord.ext import commands
 import re
@@ -5,6 +7,11 @@ import aiohttp
 import asyncio
 import unicodedata
 from collections import defaultdict
+
+# OCR-Imports
+import pytesseract
+from PIL import Image
+import io
 
 from openai import OpenAI
 
@@ -55,7 +62,8 @@ class TicketAdminView(discord.ui.View):
 
 def safe_truncate(text: str, max_chars: int) -> str:
     """
-    Kürzt den Text auf max_chars Zeichen. Hängt '... (gekürzt)' an, wenn zu lang ist.
+    Kürzt den Text auf max_chars Zeichen und fügt '... (gekürzt)' an, wenn zu lang.
+    (Wird hier nicht mehr aktiv genutzt, aber wir lassen die Funktion im Skript.)
     """
     if len(text) > max_chars:
         return text[:max_chars] + "... (gekürzt)"
@@ -91,13 +99,12 @@ class TicketCog(commands.Cog):
         self.conversations = defaultdict(list)
 
         # Speichert pro Ticket-Channel, ob eine ID bereits genannt wurde
-        # channel_id -> (bool has_id, str stored_id)
         self.channel_has_id = defaultdict(lambda: (False, ""))
 
         # Zähler für uneinsichtiges Verhalten
         self.uncooperative_count = defaultdict(int)
 
-        # OpenAI Setup:
+        # OpenAI Setup
         self.openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
         self.openai_model = config.OPENAI_MODEL or "gpt-3.5-turbo"
         self.openai_temp = 0.7
@@ -105,7 +112,7 @@ class TicketCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print("[LOG] [TicketCog] Ticket-Cog ist bereit. (on_ready in TicketCog)")
+        print("[LOG] [TicketCog] Ticket-Cog ist bereit.")
 
     # ------------------------------------------------------------------------
     # Slash-Befehl: /setup_ticket_button
@@ -133,7 +140,6 @@ class TicketCog(commands.Cog):
         view = CreateTicketView(self)
         msg = await ctx.channel.send(embed=embed, view=view)
 
-        # Channel/Message-ID in DB speichern
         self.db.save_bot_setting("TICKET_BUTTON_CHANNEL_ID", str(ctx.channel.id))
         self.db.save_bot_setting("TICKET_BUTTON_MESSAGE_ID", str(msg.id))
 
@@ -141,7 +147,7 @@ class TicketCog(commands.Cog):
         print(f"[LOG] Ticket-Button im Kanal {ctx.channel.id}, Nachricht {msg.id} gespeichert.")
 
     # ------------------------------------------------------------------------
-    # create_ticket: Erzeugt ein Ticket
+    # create_ticket
     # ------------------------------------------------------------------------
     async def create_ticket(self, interaction: discord.Interaction):
         try:
@@ -157,7 +163,6 @@ class TicketCog(commands.Cog):
                 "Du erstellst gerade bereits ein Ticket. Bitte warte einen Augenblick.",
                 ephemeral=True
             )
-            print(f"[LOG] {user.name} hat versucht, gleichzeitig mehrere Tickets zu erstellen.")
             return
 
         self.creating_tickets_for.add(user.id)
@@ -166,10 +171,8 @@ class TicketCog(commands.Cog):
             category = guild.get_channel(config.CREATED_TICKETS_CATEGORY_ID)
             if not category:
                 await interaction.followup.send("Fehler: Ticket-Kategorie nicht gefunden.", ephemeral=True)
-                print("[ERROR] Created-Tickets-Kategorie nicht gefunden.")
                 return
 
-            # Ggf. Nick statt globalem Username
             if isinstance(user, discord.Member) and user.nick:
                 user_name = user.nick
             else:
@@ -184,15 +187,12 @@ class TicketCog(commands.Cog):
             await ticket_channel.edit(sync_permissions=True)
             await ticket_channel.set_permissions(user, view_channel=True, send_messages=True)
 
-            # Viewer-Rolle (falls definiert)
             viewer_role = guild.get_role(config.VIEWER_ROLE_ID)
             if viewer_role:
                 await ticket_channel.set_permissions(viewer_role, view_channel=True, send_messages=False)
 
-            # Datenbank-Log
             self.db.log_ticket_created(ticket_id, user.id, user_name, ticket_channel.id)
 
-            # KI aktivieren
             self.ai_enabled_for_channel[ticket_channel.id] = True
 
             embed = discord.Embed(
@@ -205,20 +205,13 @@ class TicketCog(commands.Cog):
                 color=discord.Color.blue()
             )
 
-            # Admin/Support-Buttons
             view = TicketAdminView(self)
+            admin_msg = await ticket_channel.send(content=user.mention, embed=embed, view=view)
 
-            # WICHTIG: Wir speichern die Nachricht, an der die Admin-Buttons hängen => admin_message_id
-            admin_message = await ticket_channel.send(content=user.mention, embed=embed, view=view)
-
-            # Hier speicherst du die admin_message_id
-            #   - erst Ticket anlegen (oben) -> log_ticket_created
-            #   - dann admin_message_id eintragen:
-            self.db.log_ticket_admin_message(ticket_id, admin_message.id)
+            self.db.log_ticket_admin_message(ticket_id, admin_msg.id)
 
             print(f"[LOG] Ticket #{ticket_id} erstellt von {user.name} (ID: {user.id}).")
 
-            # Erste KI-Nachricht
             first_text = (
                 "Hallo, ich bin Sekretärin Siegrid. "
                 "Bitte teile mir zuerst deine **ID** mit, damit ich deinen Banngrund nachschauen kann."
@@ -234,7 +227,7 @@ class TicketCog(commands.Cog):
             self.creating_tickets_for.discard(user.id)
 
     # ------------------------------------------------------------------------
-    # claim_ticket: Ticket beanspruchen
+    # claim_ticket
     # ------------------------------------------------------------------------
     async def claim_ticket(self, interaction: discord.Interaction):
         try:
@@ -244,10 +237,11 @@ class TicketCog(commands.Cog):
 
         if not self.has_support_role(interaction.user):
             await interaction.followup.send("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
-            print(f"[LOG] {interaction.user.name} wollte ein Ticket claimen, hat aber keine Rechte.")
             return
 
         channel = interaction.channel
+        guild = interaction.guild
+
         parts = channel.name.split("-")
         if len(parts) < 2:
             await interaction.followup.send("Dies scheint kein gültiger Ticket-Kanal zu sein.", ephemeral=True)
@@ -259,11 +253,10 @@ class TicketCog(commands.Cog):
             await interaction.followup.send("Konnte Ticket-ID nicht bestimmen.", ephemeral=True)
             return
 
-        claimed_cat = interaction.guild.get_channel(config.CLAIMED_TICKETS_CATEGORY_ID)
+        claimed_cat = guild.get_channel(config.CLAIMED_TICKETS_CATEGORY_ID)
         if claimed_cat:
             await channel.edit(category=claimed_cat, sync_permissions=True)
 
-        guild = interaction.guild
         support_role = guild.get_role(config.SUPPORT_ROLE_ID)
         if support_role:
             await channel.set_permissions(support_role, send_messages=False)
@@ -281,16 +274,20 @@ class TicketCog(commands.Cog):
             await channel.set_permissions(viewer_role, view_channel=True, send_messages=False)
 
         self.db.log_ticket_claimed(ticket_id, interaction.user.id)
+
         creator_name = "-".join(parts[:-1])
         claimer_name = interaction.user.name.replace(" ", "-")[:20]
         new_name = f"{creator_name}-{claimer_name}-{ticket_id}"
         await channel.edit(name=new_name)
 
-        await interaction.followup.send(f"Ticket #{ticket_id} wurde von {interaction.user.mention} beansprucht.", ephemeral=False)
+        await interaction.followup.send(
+            f"Ticket #{ticket_id} wurde von {interaction.user.mention} beansprucht.",
+            ephemeral=False
+        )
         print(f"[LOG] Ticket #{ticket_id} wurde von {interaction.user.name} beansprucht.")
 
     # ------------------------------------------------------------------------
-    # close_ticket: Ticket schließen
+    # close_ticket
     # ------------------------------------------------------------------------
     async def close_ticket(self, interaction: discord.Interaction):
         try:
@@ -300,10 +297,11 @@ class TicketCog(commands.Cog):
 
         if not self.has_support_role(interaction.user):
             await interaction.followup.send("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
-            print(f"[LOG] {interaction.user.name} wollte Ticket schließen, hat aber keine Rechte.")
             return
 
         channel = interaction.channel
+        guild = interaction.guild
+
         parts = channel.name.split("-")
         if len(parts) < 2:
             await interaction.followup.send("Dies scheint kein gültiger Ticket-Kanal zu sein.", ephemeral=True)
@@ -318,7 +316,6 @@ class TicketCog(commands.Cog):
         self.db.log_ticket_closed(ticket_id)
         await channel.send("Ticket wird geschlossen. Bitte hier nichts mehr schreiben.")
 
-        # Transkript speichern
         messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
         lines = []
         for msg in messages:
@@ -328,7 +325,7 @@ class TicketCog(commands.Cog):
         self.db.save_transcript(ticket_id, transcript_text)
         await channel.send("Transkript wurde automatisch erstellt und gespeichert.")
 
-        closed_cat = interaction.guild.get_channel(config.CLOSED_TICKETS_CATEGORY_ID)
+        closed_cat = guild.get_channel(config.CLOSED_TICKETS_CATEGORY_ID)
         if closed_cat:
             await channel.edit(category=closed_cat, sync_permissions=True)
 
@@ -342,7 +339,7 @@ class TicketCog(commands.Cog):
         print(f"[LOG] Ticket #{ticket_id} wurde von {interaction.user.name} geschlossen.")
 
     # ------------------------------------------------------------------------
-    # delete_ticket: Ticket löschen
+    # delete_ticket
     # ------------------------------------------------------------------------
     async def delete_ticket(self, interaction: discord.Interaction):
         try:
@@ -352,10 +349,11 @@ class TicketCog(commands.Cog):
 
         if not self.has_support_role(interaction.user):
             await interaction.followup.send("Du bist kein Supporter/Admin und darfst das nicht!", ephemeral=True)
-            print(f"[LOG] {interaction.user.name} wollte Ticket löschen, hat aber keine Rechte.")
             return
 
         channel = interaction.channel
+        guild = interaction.guild
+
         parts = channel.name.split("-")
         if len(parts) < 2:
             await interaction.followup.send("Dies scheint kein gültiger Ticket-Kanal zu sein.", ephemeral=True)
@@ -367,9 +365,11 @@ class TicketCog(commands.Cog):
             await interaction.followup.send("Konnte Ticket-ID nicht bestimmen.", ephemeral=True)
             return
 
-        await interaction.followup.send(f"Ticket #{ticket_id} wird nun gelöscht (Transkript bleibt gespeichert).", ephemeral=True)
+        await interaction.followup.send(
+            f"Ticket #{ticket_id} wird nun gelöscht (Transkript bleibt gespeichert).",
+            ephemeral=True
+        )
 
-        # Letztes Transkript
         messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
         lines = []
         for msg in messages:
@@ -386,7 +386,7 @@ class TicketCog(commands.Cog):
         print(f"[LOG] Ticket #{ticket_id} wurde von {interaction.user.name} gelöscht.")
 
     ############################################################################
-    # on_message: KI-Logik
+    # on_message: KI-Logik (inkl. OCR)
     ############################################################################
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -397,7 +397,7 @@ class TicketCog(commands.Cog):
 
         channel_id = message.channel.id
 
-        # Support/Admin -> KI aus
+        # Wenn ein Supporter/Admin schreibt -> KI aus
         if self.has_support_role(message.author):
             if self.ai_enabled_for_channel.get(channel_id, False):
                 self.ai_enabled_for_channel[channel_id] = False
@@ -405,9 +405,9 @@ class TicketCog(commands.Cog):
                     "Ein Supporter oder Administrator ist jetzt anwesend. "
                     "Ich beende meine Antworten."
                 )
-                print(f"[LOG] KI im Channel {channel_id} deaktiviert (Support/Admin).")
             return
 
+        # Nur in Ticket-Kanälen
         if not self.is_ticket_channel(message.channel):
             return
 
@@ -416,13 +416,11 @@ class TicketCog(commands.Cog):
             return
 
         user_text = normalize_id_string(message.content)
-        self.conversations[channel_id].append({
-            "role": "user",
-            "content": user_text
-        })
+        self.conversations[channel_id].append({"role": "user", "content": user_text})
+
         print(f"[LOG] Neue Nachricht im Channel {channel_id} von {message.author.name}: {user_text}")
 
-        # 1) Prüfe nach fertiger Entschuldigung
+        # 1) Entschuldigung?
         apology_keywords = [
             "entschuldigung schreiben", "formulieren", "apology", "help me write",
             "schreibe mir eine entschuldigung", "schreibe mir ein statement"
@@ -432,26 +430,23 @@ class TicketCog(commands.Cog):
                 "Es tut mir leid, aber ich kann dir nicht helfen, eine Entschuldigung oder Stellungnahme zu verfassen. "
                 "Bitte erkläre mit eigenen Worten, was passiert ist."
             )
-            print(f"[LOG] Nutzer {message.author.name} bat um Entschuldigungsvorlage. Abgelehnt.")
             return
 
-        # 2) Kooperativ/Unkooperativ?
+        # 2) Kooperativ?
         is_cooperative = await self.classify_cooperative(channel_id)
         if not is_cooperative:
             self.uncooperative_count[channel_id] += 1
             if self.uncooperative_count[channel_id] >= 3:
                 await message.channel.send(
                     "Deine Antworten zeigen leider mehrfach, dass du keine Einsicht zeigst. "
-                    "Wir lehnen deinen Entbannungsantrag ab. Bitte habe Verständnis dafür, "
-                    "dass wir hier nicht weiterdiskutieren werden."
+                    "Wir lehnen deinen Entbannungsantrag ab. Bitte habe Verständnis."
                 )
                 self.ai_enabled_for_channel[channel_id] = False
-                print(f"[LOG] Entbannungsantrag abgelehnt (Channel {channel_id}, unkooperativ-Count >= 3).")
                 return
         else:
             print(f"[LOG] => kooperativ (Channel: {channel_id})")
 
-        # 3) ID bereits genannt?
+        # 3) ID?
         has_id, stored_id = self.channel_has_id[channel_id]
         if not has_id:
             possible_ids = re.findall(r"\b[a-zA-Z0-9]{16,}\b", user_text)
@@ -467,42 +462,44 @@ class TicketCog(commands.Cog):
                     reason = data["reason"]
                     player_name = data.get("player_name", "unbekannt")
 
+                    # OCR => attachments
+                    attachments = data.get("attachments", [])
+                    if attachments and isinstance(attachments, list):
+                        summaries = []
+                        for attachment_url in attachments:
+                            print(f"[LOG] Starte OCR für Anhang: {attachment_url}")
+                            full_ocr_text = await self._ocr_from_url(attachment_url)
+                            print(f"[LOG] OCR beendet. Länge des erkannten Textes: {len(full_ocr_text)} Zeichen.")
+
+                            if full_ocr_text.strip():
+                                print("[LOG] Starte Zusammenfassung des OCR-Texts...")
+                                summary = await self.summarize_ocr_text(full_ocr_text)
+                                print(f"[LOG] Zusammenfassung erstellt: {summary}")
+                                summaries.append(summary)
+                            else:
+                                print("[LOG] Kein Text erkannt (OCR-Ergebnis leer).")
+                                summaries.append("")
+
+                        # Zusammenfassungen ins eigentliche reason einfließen lassen,
+                        # ohne sie einzeln aufzuzählen
+                        if summaries:
+                            combined_summaries = " ".join(summaries).strip()
+                            if combined_summaries:
+                                reason += f" {combined_summaries}"
+
+                    # Banngrund durch die KI elaborieren
                     expanded_reason = await self.elaborate_ban_reason(player_name, reason)
 
-                    # Offensive Name?
-                    offensive_keywords = ["nazi", "hitler", "sex", "ss", "reich", "racist", "mengele", "kriegsverbrecher"]
-                    note_text = ""
-                    if any(kw in player_name.lower() for kw in offensive_keywords):
-                        note_text = (
-                            "\n**Achtung:** Der Spielername wirkt anstößig/rassistisch/"
-                            "sexistisch oder nationalsozialistisch."
-                        )
-
-                    # Falls der Name + Banngrund Rassismus etc. => extra Hinweis
-                    reason_lower = reason.lower()
-                    connection_keywords = ["name", "ns", "rassist", "sexist", "hitler", "reich", "antisemit", "mengele", "kriegsverbrecher"]
-                    connected_text = ""
-                    if any(kw in player_name.lower() for kw in offensive_keywords) and any(rk in reason_lower for rk in connection_keywords):
-                        connected_text = (
-                            "\nDa dein Spielername direkt mit dem Banngrund zusammenhängt, "
-                            "möchten wir besonders hervorheben, dass dieser Name gegen unsere Regeln verstößt. "
-                            "Er bezieht sich auf diskriminierende, rassistische oder extremistische Inhalte, "
-                            "weshalb wir konsequent handeln mussten."
-                        )
-
+                    # Endgültige Nachricht an den Spieler (ohne Bild-für-Bild-Erklärungen):
                     ban_reply = (
                         f"Hallo **{player_name}**,\n\n"
-                        f"{expanded_reason}\n"
-                        f"{note_text}{connected_text}\n\n"
+                        f"{expanded_reason}\n\n"
                         "Bitte gib jetzt deinen **Entbannungsantrag** dazu ab: "
-                        "Begründe wieso du entbannt werden möchtest. Warum kam es deiner Meinung nach dazu?"
+                        "Warum möchtest du entbannt werden und wie siehst du dein Verhalten?"
                     )
 
                     self.channel_has_id[channel_id] = (True, found_id)
-                    self.conversations[channel_id].append({
-                        "role": "assistant",
-                        "content": ban_reply
-                    })
+                    self.conversations[channel_id].append({"role": "assistant", "content": ban_reply})
                     await message.channel.send(ban_reply)
                     return
                 else:
@@ -511,7 +508,7 @@ class TicketCog(commands.Cog):
                     )
                     return
         else:
-            # 4) Ausreichende Stellungnahme?
+            # 4) Stellungnahme ausreichend?
             if self.is_sufficient_explanation(user_text, message.guild):
                 admin_role = message.guild.get_role(config.ADMIN_ROLE_ID)
                 support_role = message.guild.get_role(config.SUPPORT_ROLE_ID)
@@ -524,8 +521,7 @@ class TicketCog(commands.Cog):
                 mention_text = ", ".join(mentions) if mentions else "Support/Administrator"
 
                 await message.channel.send(
-                    "Danke für deine ausführliche Erklärung. "
-                    f"Ich gebe das nun an {mention_text} weiter, der/die sich darum kümmern wird."
+                    f"Danke für deine ausführliche Erklärung. Ich gebe das nun an {mention_text} weiter."
                 )
                 self.ai_enabled_for_channel[channel_id] = False
                 return
@@ -541,6 +537,69 @@ class TicketCog(commands.Cog):
                 await message.channel.send("Entschuldige, es ist ein Fehler bei der KI-Anfrage aufgetreten.")
 
     # ------------------------------------------------------------------------
+    # OCR-Methoden
+    # ------------------------------------------------------------------------
+    async def _ocr_from_url(self, image_url: str) -> str:
+        """
+        Lädt das Bild, führt OCR via pytesseract aus und gibt den erkannten Text zurück.
+        """
+        print(f"[LOG] [OCR] Versuche, Bild herunterzuladen: {image_url}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as resp:
+                    if resp.status == 200:
+                        image_bytes = await resp.read()
+                        img = Image.open(io.BytesIO(image_bytes))
+                        print("[LOG] [OCR] Bild erfolgreich geladen, starte Tesseract...")
+                        text = pytesseract.image_to_string(img, lang="deu")
+                        print("[LOG] [OCR] Tesseract fertig.")
+                        return text
+                    else:
+                        print(f"[ERROR] [OCR] Download fehlgeschlagen, Status: {resp.status}")
+                        return ""
+        except Exception as e:
+            print(f"[ERROR] [OCR] Fehler bei OCR von {image_url}: {e}")
+            return ""
+
+    async def summarize_ocr_text(self, ocr_text: str) -> str:
+        """
+        Erstellt via GPT eine kurze Zusammenfassung des OCR-Textes,
+        ohne diesen 1:1 zu wiederholen.
+        """
+        print("[LOG] [OCR] Starte Zusammenfassungs-Request an OpenAI.")
+        system_prompt = (
+            "Du bist ein Assistent, der aus dem folgenden OCR-Text "
+            "eine kurze, deutsche Zusammenfassung erstellt. "
+            "Bitte verwende Du-Formulierung falls angemessen. "
+            "Verzichte auf exaktes Zitieren langer Passagen."
+        )
+        user_prompt = f"OCR-Text:\n{ocr_text}\n\nErstelle eine kurze Zusammenfassung:"
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        loop = asyncio.get_running_loop()
+
+        def sync_call():
+            response = self.openai_client.chat.completions.create(
+                model=self.openai_model,
+                messages=messages,
+                max_tokens=200,
+                temperature=0.7
+            )
+            return response
+
+        try:
+            response = await loop.run_in_executor(None, sync_call)
+            summary = response.choices[0].message.content.strip()
+            print("[LOG] [OCR] Zusammenfassung erfolgreich erhalten.")
+            return summary
+        except Exception as e:
+            print("[Fehler bei summarize_ocr_text]", e)
+            return ""
+
+    # ------------------------------------------------------------------------
     # KI-Hilfsmethoden
     # ------------------------------------------------------------------------
     async def classify_cooperative(self, channel_id: int) -> bool:
@@ -552,8 +611,7 @@ class TicketCog(commands.Cog):
                 "und entscheide, ob der Nutzer 'unkooperativ' ist oder nicht. "
                 "Beleidigungen, aggressives Verhalten, ignoriert alle Fragen => unkooperativ. "
                 "Wenn der Nutzer einigermaßen höflich/sachlich ist => cooperative. "
-                "ACHTUNG: Antworte nur mit dem Wort 'uncooperative' oder 'cooperative'. "
-                "Keine Abkürzungen, keine Satzzeichen."
+                "Antworte nur mit 'uncooperative' oder 'cooperative'."
             )
         }
 
@@ -586,13 +644,17 @@ class TicketCog(commands.Cog):
             return True
 
     async def elaborate_ban_reason(self, player_name: str, reason: str) -> str:
+        """
+        Spreche den Spieler direkt in Du-Form an, ohne weitere Begrüßung.
+        """
         prompt_messages = [
             {
                 "role": "system",
                 "content": (
-                    "Du bist ein freundlicher, aber strenger Moderator in dem Spiel 'Hack let Loose'. "
-                    "Dir liegt folgender Banngrund vor, und du sollst ihn in 1-2 Sätzen erklären, "
-                    "warum das Verhalten des Spielers problematisch ist."
+                    "Du bist ein freundlicher, aber strenger Moderator in dem Spiel 'Hell let Loose'. "
+                    "Dir liegt folgender Banngrund vor, und du sollst ihm erklären, "
+                    "warum das Verhalten problematisch ist. Sprich den Spieler direkt in der Du-Form an, "
+                    "aber vermeide eine gesonderte Begrüßung wie 'Hallo XYZ'."
                 )
             },
             {
@@ -600,8 +662,8 @@ class TicketCog(commands.Cog):
                 "content": (
                     f"Spielername: {player_name}\n"
                     f"Banngrund (kurz): {reason}\n\n"
-                    "Erkläre dem Spieler kurz, warum dieser Banngrund problematisch ist, "
-                    "in maximal 2 Sätzen."
+                    "Erkläre in Du-Form, warum dieses Verhalten inakzeptabel ist, "
+                    "ohne den Spieler erneut mit einem 'Hallo' oder Namen anzureden."
                 )
             }
         ]
@@ -612,7 +674,7 @@ class TicketCog(commands.Cog):
             response = self.openai_client.chat.completions.create(
                 model=self.openai_model,
                 messages=prompt_messages,
-                max_tokens=150,
+                max_tokens=1000,
                 temperature=0.7
             )
             return response
@@ -620,13 +682,12 @@ class TicketCog(commands.Cog):
         try:
             response = await loop.run_in_executor(None, sync_call)
             elaboration = response.choices[0].message.content.strip()
-            elaboration = safe_truncate(elaboration, 300)
             return elaboration
         except Exception as e:
             print("[Fehler bei elaborate_ban_reason]", e)
             return (
-                f"Dein Banngrund lautet: {reason}. "
-                "Wir möchten dich bitten, es ernst zu nehmen und uns zu erläutern, weshalb es dazu kam."
+                "Dein Verhalten widerspricht unseren Richtlinien und schadet der Community-Atmosphäre. "
+                "Bitte erkläre, warum es aus deiner Sicht dazu kam."
             )
 
     async def generate_ai_response(self, channel_id: int) -> str:
@@ -635,11 +696,8 @@ class TicketCog(commands.Cog):
             "role": "system",
             "content": (
                 "Du bist Sekretärin Siegrid, eine ernsthafte, aber freundliche KI-Assistentin von Hack let Loose. "
-                "Deine Aufgabe: Frage den Nutzer nach Details zum Banngrund und versuche, "
-                "eine vollständige Stellungnahme zu erhalten. "
-                "Ermutige ihn, seine Perspektive zu schildern, falls Unklarheiten bestehen. "
-                "Wenn der Nutzer dich bittet, eine fertige Entschuldigung zu schreiben, lehne es ab. "
-                "Sprich den Nutzer per du an und bleibe sachlich."
+                "Sprich den Nutzer direkt in der Du-Form an. Wenn er dich bittet, "
+                "eine fertige Entschuldigung zu schreiben, lehne es ab."
             )
         }
 

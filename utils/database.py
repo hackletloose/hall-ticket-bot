@@ -1,3 +1,5 @@
+# utils/database.py
+
 import sqlite3
 
 class Database:
@@ -17,7 +19,7 @@ class Database:
                     status TEXT DEFAULT 'open',
                     claimed_by TEXT,
                     user_name TEXT
-                    -- admin_message_id kommt gleich per ALTER TABLE
+                    -- admin_message_id kommt via _ensure_admin_message_id_column
                 );
             """)
 
@@ -99,7 +101,7 @@ class Database:
     def log_ticket_admin_message(self, ticket_id: int, admin_message_id: int):
         """
         Speichert die Nachricht, in der die Admin-Buttons sind,
-        damit wir sie reattachen können.
+        damit wir sie nach einem Neustart wieder anhängen können.
         """
         with sqlite3.connect("tickets.sqlite") as conn:
             conn.execute(

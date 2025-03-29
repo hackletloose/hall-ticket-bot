@@ -1,3 +1,5 @@
+# main.py
+
 import discord
 from discord.ext import commands
 
@@ -116,14 +118,11 @@ async def on_ready():
             channel = guild.get_channel(channel_id)
 
             if channel:
-                # Alte Nachricht per ID holen
                 old_msg = await channel.fetch_message(message_id)
-                # Cog + View-Klasse importieren
                 from cogs.ticket_cog import TicketCog, CreateTicketView
                 ticket_cog = bot.get_cog("TicketCog")
 
                 if ticket_cog and old_msg:
-                    # Neue View an alte Nachricht anheften
                     new_view = CreateTicketView(ticket_cog)
                     await old_msg.edit(view=new_view)
                     print(f"[LOG] Ticket-Button (Message-ID={message_id}) wurde erfolgreich erneut aktiviert.")
@@ -154,7 +153,6 @@ async def on_ready():
                     tid = t["ticket_id"]
 
                     if not admin_msg_id:
-                        # Falls wir für dieses Ticket noch keine admin_message_id gespeichert haben, überspringen wir
                         continue
 
                     ticket_channel = guild.get_channel(int(chan_id))
