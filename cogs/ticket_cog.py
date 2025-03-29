@@ -620,7 +620,7 @@ class TicketCog(commands.Cog):
 
         def sync_call():
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model=self.openai_model,
                 messages=messages_for_ai,
                 max_tokens=5,
                 temperature=0.0
